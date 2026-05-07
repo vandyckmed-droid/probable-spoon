@@ -11,6 +11,7 @@ from config import (
     V_EBIT_EV_W, V_FCF_EV_W,
     W_MOMENTUM, W_QUALITY, W_VALUE,
     QUALITY_FALLBACK_THRESHOLD, VALUE_FALLBACK_THRESHOLD,
+    MIN_SECTOR_SIZE,
 )
 
 
@@ -179,14 +180,22 @@ def compute_residual_momentum(
 # ===== PART 3: quality & value =====
 
 def _winsor_zscore_within_sector(s: pd.Series, sectors: pd.Series) -> pd.Series:
-    """Group s by sectors; winsorize then z-score within each. Single-finite-member → NaN."""
+    """Within-sector winsorize+z when the sector has at least MIN_SECTOR_SIZE
+    finite members; otherwise fall back to a universe-wide z for those tickers.
+    Preserves NaN where the input itself is NaN.
+    """
     out = pd.Series(np.nan, index=s.index, dtype=float)
     sec = sectors.reindex(s.index)
+    fallback_idx: list = []
     for _, idx in sec.groupby(sec).groups.items():
         group = s.loc[idx]
-        if group.dropna().shape[0] < 2:
-            continue
-        out.loc[idx] = _zscore(_winsorize(group))
+        if group.dropna().shape[0] >= MIN_SECTOR_SIZE:
+            out.loc[idx] = _zscore(_winsorize(group))
+        else:
+            fallback_idx.extend(idx)
+    if fallback_idx:
+        universe_z = _zscore(_winsorize(s))
+        out.loc[fallback_idx] = universe_z.loc[fallback_idx]
     return out
 
 
