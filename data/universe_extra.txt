@@ -1,1 +1,1 @@
-# Tickers added via expand.py — one per line, # for comments
+# Tickers added via expand.py - one per line, # for comments

@@ -19,7 +19,7 @@ def load_universe_json() -> dict[str, list[str]]:
     if not UNIVERSE_JSON.exists():
         return {}
     try:
-        with open(UNIVERSE_JSON) as f:
+        with open(UNIVERSE_JSON, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
@@ -37,7 +37,7 @@ def load_universe_extras() -> list[str]:
         return []
     out: list[str] = []
     seen: set[str] = set()
-    with open(UNIVERSE_EXTRA) as f:
+    with open(UNIVERSE_EXTRA, encoding="utf-8") as f:
         for line in f:
             line = line.split("#", 1)[0].strip()
             if not line:
@@ -53,7 +53,7 @@ def load_sector_etf_map() -> dict[str, str]:
     if not SECTOR_ETF_MAP.exists():
         return {}
     try:
-        with open(SECTOR_ETF_MAP) as f:
+        with open(SECTOR_ETF_MAP, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
@@ -114,9 +114,12 @@ def add_to_universe_extras(tickers: list[str]) -> list[str]:
         return []
 
     UNIVERSE_EXTRA.parent.mkdir(parents=True, exist_ok=True)
-    content = UNIVERSE_EXTRA.read_text() if UNIVERSE_EXTRA.exists() else ""
+    content = (
+        UNIVERSE_EXTRA.read_text(encoding="utf-8")
+        if UNIVERSE_EXTRA.exists() else ""
+    )
     if content and not content.endswith("\n"):
         content += "\n"
     content += "\n".join(new) + "\n"
-    UNIVERSE_EXTRA.write_text(content)
+    UNIVERSE_EXTRA.write_text(content, encoding="utf-8")
     return new
