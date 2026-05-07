@@ -101,7 +101,11 @@ def ticker_to_sector(profiles_data: dict) -> dict[str, str]:
             out[t] = "Semiconductors"
         elif "aerospace" in industry or "defense" in industry:
             out[t] = "Aerospace & Defense"
-    return out
+
+    # Restrict to the deduped universe so dropped share classes
+    # (e.g. PBR-A when PBR is also present) don't reappear downstream.
+    valid = set(all_tickers())
+    return {t: s for t, s in out.items() if t in valid}
 
 
 def add_to_universe_extras(tickers: list[str]) -> list[str]:
