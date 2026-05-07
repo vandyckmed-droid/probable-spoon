@@ -19,9 +19,12 @@ def load_cache() -> dict:
 
 def save_cache(cache: dict) -> None:
     p = Path(config.PRICES_CACHE)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "wb") as f:
-        pickle.dump(cache, f)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "wb") as f:
+            pickle.dump(cache, f)
+    except (OSError, PermissionError) as e:
+        print(f"WARNING: could not save prices cache to {p}: {e}")
 
 
 def is_stale(cache: dict) -> bool:
