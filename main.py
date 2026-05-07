@@ -11,7 +11,10 @@ warnings.filterwarnings("ignore", message=".*quick_look.*", category=Deprecation
 import analytics
 import report
 import store
-from config import MARKET_TICKER
+import weights as weights_mod
+from config import (
+    MARKET_TICKER, TOP_N, WEIGHTING_SCHEME, WEIGHT_LOOKBACK_DAYS,
+)
 from universe import load_sector_etf_map, ticker_to_sector
 
 
@@ -106,6 +109,15 @@ def main():
     qual_df, _ = analytics.compute_quality(funds, ts)
     val_df, _ = analytics.compute_value(funds, prices_df, ts)
     ranked, factors_used = analytics.build_ranked(mom_df, qual_df, val_df, ts)
+
+    top_n = min(TOP_N, len(ranked))
+    top_tickers = ranked.head(top_n).index.tolist()
+    w = weights_mod.compute_weights(
+        WEIGHTING_SCHEME, returns, top_tickers, WEIGHT_LOOKBACK_DAYS,
+    )
+    ranked["weight"] = ranked.index.map(w).fillna(0.0)
+    factors_used["weighting_scheme"] = WEIGHTING_SCHEME
+    factors_used["top_n"] = top_n
 
     names = store.company_names(ranked.index.tolist())
     html = report.render(ranked, names, factors_used)

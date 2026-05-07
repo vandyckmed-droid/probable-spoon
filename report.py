@@ -55,7 +55,12 @@ def _format_weights(weights: dict) -> str:
 def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
     """Return HTML string."""
     weights = factors_used.get("weights", {})
-    header = f"Weights: {_format_weights(weights)}"
+    scheme = factors_used.get("weighting_scheme", "")
+    top_n = factors_used.get("top_n")
+    header_parts = [f"Weights: {_format_weights(weights)}"]
+    if scheme and top_n:
+        header_parts.append(f"Top {top_n} weighted by {scheme.replace('_', ' ')}")
+    header = " — ".join(header_parts)
 
     rows_html = []
     for ticker, row in ranked_df.iterrows():
@@ -68,6 +73,9 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         cls = "num colored" if color else "num"
         style = f' style="background:{color}"' if color else ""
         name = _escape(names.get(ticker, ticker))
+        weight_val = row.get("weight")
+        weight = float(weight_val) if pd.notna(weight_val) else 0.0
+        weight_cell = f"{weight*100:.2f}%" if weight > 0 else ""
         rows_html.append(
             "<tr>"
             f'<td class="num">{rank}</td>'
@@ -75,6 +83,7 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
             f"<td>{name}</td>"
             f"<td>{sector}</td>"
             f'<td class="{cls}"{style}>{composite:.3f}</td>'
+            f'<td class="num">{weight_cell}</td>'
             "</tr>"
         )
 
@@ -88,7 +97,8 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         f'<div class="header">{_escape(header)}</div>'
         "<table>"
         "<thead><tr>"
-        "<th>Rank</th><th>Ticker</th><th>Company</th><th>Sector</th><th>Composite</th>"
+        "<th>Rank</th><th>Ticker</th><th>Company</th><th>Sector</th>"
+        "<th>Composite</th><th>Weight</th>"
         "</tr></thead><tbody>"
         + "".join(rows_html)
         + "</tbody></table></body></html>"
