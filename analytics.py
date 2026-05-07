@@ -2,11 +2,11 @@
 import numpy as np
 import pandas as pd
 from config import (
-    MOMENTUM_MIN_OBS, MARKET_TICKER,
+    MOMENTUM_MIN_OBS, MARKET_TICKER, BETA_LOOKBACK_DAYS,
     MOM_SKIP_DAYS, MOM_LONG_DAYS, MOM_SHORT_DAYS, MOM_REV_DAYS,
     MOM_W_12_1, MOM_W_6_1,
+    SIGMA_DAYS, SIGMA_FLOOR,
     WINSOR_LOWER, WINSOR_UPPER,
-    TRADING_DAYS_PER_YEAR,
     Q_GP_W, Q_GP_CHANGE_W, Q_NETDEBT_W,
     V_EBIT_EV_W, V_FCF_EV_W,
     W_MOMENTUM, W_QUALITY, W_VALUE,
@@ -34,16 +34,18 @@ def compute_sector_residuals(
     returns: pd.DataFrame,
     sector_etf_map: dict[str, str],
 ) -> dict[str, pd.Series]:
-    """Regress each sector ETF on the market; return residual series per sector."""
+    """Regress each sector ETF on the market over the last BETA_LOOKBACK_DAYS;
+    return residual series per sector."""
     if MARKET_TICKER not in returns.columns:
         return {}
-    market = returns[MARKET_TICKER]
+    window = returns.tail(BETA_LOOKBACK_DAYS)
+    market = window[MARKET_TICKER]
     out: dict[str, pd.Series] = {}
     for sector, etf in sector_etf_map.items():
-        if etf not in returns.columns:
+        if etf not in window.columns:
             continue
         df = pd.concat(
-            [returns[etf].rename("y"), market.rename("m")], axis=1
+            [window[etf].rename("y"), market.rename("m")], axis=1
         ).dropna()
         if len(df) < MOMENTUM_MIN_OBS:
             continue
@@ -58,14 +60,16 @@ def compute_stock_residuals(
     sector_residuals: dict[str, pd.Series],
     ticker_sector: dict[str, str],
 ) -> tuple[pd.DataFrame, dict, dict]:
-    """Regress each stock on [market, its sector residual]. Drop on insufficient data."""
+    """Regress each stock on [market, its sector residual] over the last
+    BETA_LOOKBACK_DAYS. Drop on insufficient data."""
     if MARKET_TICKER not in returns.columns:
         return pd.DataFrame(), {}, {}
-    market = returns[MARKET_TICKER]
+    window = returns.tail(BETA_LOOKBACK_DAYS)
+    market = window[MARKET_TICKER]
     resid_cols: dict[str, pd.Series] = {}
     betas_market: dict[str, float] = {}
     betas_sector: dict[str, float] = {}
-    for ticker in returns.columns:
+    for ticker in window.columns:
         if ticker == MARKET_TICKER:
             continue
         sector = ticker_sector.get(ticker)
@@ -76,7 +80,7 @@ def compute_stock_residuals(
             continue
         df = pd.concat(
             [
-                returns[ticker].rename("y"),
+                window[ticker].rename("y"),
                 market.rename("m"),
                 sector_resid.rename("s"),
             ],
@@ -113,36 +117,45 @@ def _zscore(s: pd.Series) -> pd.Series:
     return (s - mean) / std
 
 
-def _sharpe_like(window: np.ndarray) -> float:
-    """sum / (std * sqrt(TRADING_DAYS_PER_YEAR)). NaN if empty or std<=0."""
-    if window.size == 0:
-        return float("nan")
-    std = float(np.std(window, ddof=0))
-    if std <= 0:
-        return float("nan")
-    return float(np.sum(window)) / (std * float(np.sqrt(TRADING_DAYS_PER_YEAR)))
-
-
 def compute_residual_momentum(
     stock_residuals: pd.DataFrame,
     ticker_sector: dict[str, str],
 ) -> pd.DataFrame:
-    """Per-ticker momentum sleeves, cross-sectional z (universe-wide), composite."""
+    """Risk-adjusted residual momentum sleeves, cross-sectional z, 50/50 composite.
+
+    For each ticker:
+      momentum_12_1 = sum(resid[-MOM_LONG_DAYS:-MOM_SKIP_DAYS])
+      momentum_6_1  = sum(resid[-MOM_SHORT_DAYS:-MOM_SKIP_DAYS])
+      sigma_63      = std(resid[-SIGMA_DAYS:], ddof=0), floored at SIGMA_FLOOR  (no skip, not annualised)
+      m12_raw       = momentum_12_1 / sigma_63
+      m6_raw        = momentum_6_1  / sigma_63
+      m1_raw        = sum(resid[-MOM_REV_DAYS:]) / sigma_63   # diagnostic only
+
+    Each sleeve is then winsorized + z-scored across the universe, combined
+    50/50, and z-scored once more.
+    """
     rows: dict[str, dict] = {}
     for ticker in stock_residuals.columns:
         s = stock_residuals[ticker].dropna()
         n = len(s)
         arr = s.to_numpy()
+        if n < SIGMA_DAYS:
+            rows[ticker] = {
+                "sector": ticker_sector.get(ticker, "Unknown"),
+                "m12_raw": float("nan"), "m6_raw": float("nan"), "m1_raw": float("nan"),
+            }
+            continue
+        sigma = max(float(np.std(arr[-SIGMA_DAYS:], ddof=0)), SIGMA_FLOOR)
         m12 = (
-            _sharpe_like(arr[-(MOM_LONG_DAYS + MOM_SKIP_DAYS):-MOM_SKIP_DAYS])
-            if n >= MOM_LONG_DAYS + MOM_SKIP_DAYS else float("nan")
+            float(np.sum(arr[-MOM_LONG_DAYS:-MOM_SKIP_DAYS])) / sigma
+            if n >= MOM_LONG_DAYS else float("nan")
         )
         m6 = (
-            _sharpe_like(arr[-(MOM_SHORT_DAYS + MOM_SKIP_DAYS):-MOM_SKIP_DAYS])
-            if n >= MOM_SHORT_DAYS + MOM_SKIP_DAYS else float("nan")
+            float(np.sum(arr[-MOM_SHORT_DAYS:-MOM_SKIP_DAYS])) / sigma
+            if n >= MOM_SHORT_DAYS else float("nan")
         )
         m1 = (
-            _sharpe_like(arr[-MOM_REV_DAYS:])
+            float(np.sum(arr[-MOM_REV_DAYS:])) / sigma
             if n >= MOM_REV_DAYS else float("nan")
         )
         rows[ticker] = {
