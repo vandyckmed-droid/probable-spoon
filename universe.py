@@ -7,11 +7,17 @@ UNIVERSE_EXTRA = Path("data/universe_extra.txt")
 SECTOR_ETF_MAP = Path("data/sector_etf_map.json")
 
 # When both share classes appear, keep the voting class and drop the other.
-# GOOGL (voting) > GOOG, FOXA (voting) > FOX, BRK.A (voting) > BRK.B.
+# GOOGL (voting) > GOOG, FOXA (voting) > FOX, BRK.A (voting) > BRK.B,
+# PBR (Brazilian ON, voting) > PBR-A (PN preferred, non-voting).
+# Both dotted and hyphenated ticker conventions are covered for share classes
+# where US data vendors disagree on the format (BRK, PBR).
 _SHARE_CLASS_DROPS = {
     "GOOG": "GOOGL",
     "FOX": "FOXA",
     "BRK.B": "BRK.A",
+    "BRK-B": "BRK-A",
+    "PBR-A": "PBR",
+    "PBR.A": "PBR",
 }
 
 
