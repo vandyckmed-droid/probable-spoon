@@ -1,4 +1,4 @@
-"""Orchestrator for the M/Q/V ranking pipeline."""
+"""Orchestrator for the M/Q/V ranking pipeline. Cache-only by default."""
 import argparse
 from pathlib import Path
 
@@ -10,14 +10,16 @@ from universe import load_sector_etf_map, ticker_to_sector
 
 
 def parse_args(argv=None):
-    p = argparse.ArgumentParser(description="Run the M/Q/V ranking pipeline.")
-    p.add_argument(
-        "--refresh", action="store_true",
-        help="Force refetch of all caches.",
+    p = argparse.ArgumentParser(
+        description="Rank the universe from cached data. Default: no network."
     )
     p.add_argument(
-        "--no-fetch", action="store_true",
-        help="Use caches only; never hit the network.",
+        "--refresh", action="store_true",
+        help="Force refetch of all caches before ranking.",
+    )
+    p.add_argument(
+        "--update", action="store_true",
+        help="Top up missing/stale data before ranking.",
     )
     p.add_argument(
         "--output", default="reports/",
@@ -34,21 +36,23 @@ def main():
     tickers = store.universe()
     sector_etf_map = load_sector_etf_map()
     sector_etfs = list(sector_etf_map.values())
+    print(f"Universe: {len(tickers)} stocks, {len(sector_etfs)} sector ETFs.")
 
-    all_for_prices = list(dict.fromkeys([MARKET_TICKER, *sector_etfs, *tickers]))
-    store.ensure(
-        all_for_prices,
-        with_fundamentals=False,
-        with_profiles=False,
-        force=args.refresh,
-        no_fetch=args.no_fetch,
-    )
-    store.ensure(
-        tickers,
-        with_prices=False,
-        force=args.refresh,
-        no_fetch=args.no_fetch,
-    )
+    do_fetch = args.refresh or args.update
+    if do_fetch:
+        all_for_prices = list(
+            dict.fromkeys([MARKET_TICKER, *sector_etfs, *tickers])
+        )
+        store.ensure(
+            all_for_prices,
+            with_fundamentals=False, with_profiles=False,
+            force=args.refresh,
+        )
+        store.ensure(
+            tickers,
+            with_prices=False,
+            force=args.refresh,
+        )
 
     ts = ticker_to_sector(store.profiles())
 

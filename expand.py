@@ -92,6 +92,7 @@ def main(argv=None):
         print(f"Already present: {', '.join(already)}")
     if new and not args.no_fetch:
         print(f"Fetched data for: {', '.join(new)}")
+    print(f"Universe now contains {len(store.universe())} tickers.")
 
 
 if __name__ == "__main__":

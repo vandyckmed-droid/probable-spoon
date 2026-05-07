@@ -68,13 +68,25 @@ def company_names(tickers: list[str]) -> dict[str, str]:
 
 
 def add_to_universe(tickers: list[str], *, fetch: bool = True) -> list[str]:
-    """Append to extras file. If fetch=True, top up fundamentals/profiles for new ones.
+    """Append to extras file. If fetch=True, top up all caches for the new tickers.
 
-    Skips prices on purpose: fetch_prices rewrites its cache, and this module
-    does not see market/sector ETFs. The main pipeline owns the full-union
-    prices refresh.
+    Prices: rewritten with the full union (market + sector ETFs + universe) so
+    new tickers are added without dropping the market/ETF columns.
+    Fundamentals + profiles: per-ticker top-up for the newly-added tickers only.
     """
+    from config import MARKET_TICKER
+
     new = universe_mod.add_to_universe_extras(tickers)
     if new and fetch:
         ensure(new, with_prices=False)
+        sector_etfs = list(universe_mod.load_sector_etf_map().values())
+        full = universe_mod.all_tickers()
+        all_for_prices = list(
+            dict.fromkeys([MARKET_TICKER, *sector_etfs, *full])
+        )
+        ensure(
+            all_for_prices,
+            with_fundamentals=False,
+            with_profiles=False,
+        )
     return new
