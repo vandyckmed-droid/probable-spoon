@@ -25,17 +25,20 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def fetch_top_by_market_cap(n: int) -> list[str]:
-    """Top N US-listed stocks by market cap via the FMP screener (stable → legacy)."""
+def fetch_top_by_market_cap(
+    n: int, *, exclude: set[str] | None = None,
+) -> list[str]:
+    """Top N US-listed stocks by market cap, skipping any in `exclude`."""
     if n <= 0:
         return []
+    exclude_upper = {t.upper() for t in (exclude or set())}
     params = {
         "marketCapMoreThan": 1_000_000_000,
         "isEtf": "false",
         "isFund": "false",
         "isActivelyTrading": "true",
         "exchange": "NYSE,NASDAQ",
-        "limit": max(n * 5, 200),
+        "limit": max(n * 5 + len(exclude_upper) + 200, 500),
     }
     try:
         rows = fmp_client.get("company-screener", params=params)
@@ -56,11 +59,15 @@ def fetch_top_by_market_cap(n: int) -> list[str]:
     seen: set[str] = set()
     for r in rows:
         s = r.get("symbol") if isinstance(r, dict) else None
-        if s and s not in seen:
-            seen.add(s)
-            out.append(s)
-            if len(out) >= n:
-                break
+        if not s:
+            continue
+        u = s.upper()
+        if u in seen or u in exclude_upper:
+            continue
+        seen.add(u)
+        out.append(s)
+        if len(out) >= n:
+            break
     return out
 
 
@@ -68,8 +75,12 @@ def main(argv=None):
     args = parse_args(argv)
     raw = list(args.tickers)
     if not raw:
-        print(f"Fetching top {args.top} by market cap...")
-        raw = fetch_top_by_market_cap(args.top)
+        existing = {t.upper() for t in store.universe()}
+        print(
+            f"Fetching next {args.top} by market cap "
+            f"(skipping {len(existing)} already in universe)..."
+        )
+        raw = fetch_top_by_market_cap(args.top, exclude=existing)
         if not raw:
             print("Could not fetch. Check FMP_API_KEY at the top of config.py.")
             return
