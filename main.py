@@ -14,6 +14,7 @@ import store
 import weights as weights_mod
 from config import (
     MARKET_TICKER, TOP_N, WEIGHTING_SCHEME, WEIGHT_LOOKBACK_DAYS,
+    CASH_DEPLOYMENT,
 )
 from universe import load_sector_etf_map, ticker_to_sector
 
@@ -69,6 +70,11 @@ def parse_args(argv=None):
         "--no-open", action="store_true",
         help="Do not auto-open the report after writing.",
     )
+    p.add_argument(
+        "--cash", type=float, default=None, metavar="DOLLARS",
+        help=f"Cash to allocate across the top N (default {CASH_DEPLOYMENT}). "
+             "The Weight column renders as a rounded dollar amount.",
+    )
     return p.parse_args(argv)
 
 
@@ -116,8 +122,10 @@ def main():
         WEIGHTING_SCHEME, returns, top_tickers, WEIGHT_LOOKBACK_DAYS,
     )
     ranked["weight"] = ranked.index.map(w).fillna(0.0)
+    cash = args.cash if args.cash is not None else CASH_DEPLOYMENT
     factors_used["weighting_scheme"] = WEIGHTING_SCHEME
     factors_used["top_n"] = top_n
+    factors_used["cash_deployment"] = float(cash)
 
     names = store.company_names(ranked.index.tolist())
     html = report.render(ranked, names, factors_used)

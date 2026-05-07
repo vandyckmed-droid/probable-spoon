@@ -16,13 +16,11 @@ _CSS = (
     " td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }"
     " td.colored { color: #1a1a1a; }"  # composite cell text always dark on colored bg
     " .header { margin-bottom: 8px; color: #444; }"
-    " .cash-picker select { font-size: 14px; padding: 2px 6px; }"
     " @media (prefers-color-scheme: dark) {"
     "   body { color: #e6e6e6; background: #121212; }"
     "   th { background: #1f1f1f; }"
     "   th, td { border-bottom-color: #2a2a2a; }"
     "   .header { color: #aaa; }"
-    "   .cash-picker select { background: #1f1f1f; color: #e6e6e6; border: 1px solid #444; }"
     " }"
 )
 
@@ -59,9 +57,12 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
     weights = factors_used.get("weights", {})
     scheme = factors_used.get("weighting_scheme", "")
     top_n = factors_used.get("top_n")
+    cash = float(factors_used.get("cash_deployment") or 0)
     header_parts = [f"Weights: {_format_weights(weights)}"]
     if scheme and top_n:
         header_parts.append(f"Top {top_n} weighted by {scheme.replace('_', ' ')}")
+    if cash > 0:
+        header_parts.append(f"Cash deployed: ${int(round(cash)):,}")
     header = " — ".join(header_parts)
 
     rows_html = []
@@ -77,7 +78,10 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         name = _escape(names.get(ticker, ticker))
         weight_val = row.get("weight")
         weight = float(weight_val) if pd.notna(weight_val) else 0.0
-        weight_cell = f"{weight*100:.2f}%" if weight > 0 else ""
+        if weight > 0 and cash > 0:
+            cash_cell = f"${int(round(weight * cash)):,}"
+        else:
+            cash_cell = ""
         rows_html.append(
             "<tr>"
             f'<td class="num">{rank}</td>'
@@ -85,31 +89,9 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
             f"<td>{name}</td>"
             f"<td>{sector}</td>"
             f'<td class="{cls}"{style}>{composite:.3f}</td>'
-            f'<td class="num">{weight_cell}</td>'
-            f'<td class="num cash" data-weight="{weight}"></td>'
+            f'<td class="num">{cash_cell}</td>'
             "</tr>"
         )
-
-    cash_options = "".join(
-        f'<option value="{v}">${v:,}</option>' for v in (25000, 30000, 35000, 40000)
-    )
-    cash_picker = (
-        '<span class="cash-picker">Cash: '
-        f'<select id="cashSelect">{cash_options}</select></span>'
-    )
-    js = (
-        "<script>"
-        "function updateCash(){"
-        "var c=parseFloat(document.getElementById('cashSelect').value);"
-        "var cells=document.getElementsByClassName('cash');"
-        "for(var i=0;i<cells.length;i++){"
-        "var w=parseFloat(cells[i].getAttribute('data-weight'));"
-        "if(!isFinite(w)||w<=0){cells[i].textContent='';}"
-        "else{cells[i].textContent='$'+Math.round(w*c).toLocaleString();}}}"
-        "document.getElementById('cashSelect').addEventListener('change',updateCash);"
-        "updateCash();"
-        "</script>"
-    )
 
     return (
         "<!doctype html>"
@@ -118,17 +100,14 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         "<title>M/Q/V Ranking</title>"
         f"<style>{_CSS}</style>"
         "</head><body>"
-        f'<div class="header">{_escape(header)}'
-        f' &nbsp;|&nbsp; {cash_picker}</div>'
+        f'<div class="header">{_escape(header)}</div>'
         "<table>"
         "<thead><tr>"
         "<th>Rank</th><th>Ticker</th><th>Company</th><th>Sector</th>"
-        "<th>Composite</th><th>Weight</th><th>Cash</th>"
+        "<th>Composite</th><th>Cash</th>"
         "</tr></thead><tbody>"
         + "".join(rows_html)
-        + "</tbody></table>"
-        + js
-        + "</body></html>"
+        + "</tbody></table></body></html>"
     )
 
 
