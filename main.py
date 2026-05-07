@@ -1,5 +1,6 @@
 """Orchestrator for the M/Q/V ranking pipeline. Cache-only by default."""
 import argparse
+import webbrowser
 from pathlib import Path
 
 import analytics
@@ -24,6 +25,10 @@ def parse_args(argv=None):
     p.add_argument(
         "--output", default="reports/",
         help="Output directory (default: reports/).",
+    )
+    p.add_argument(
+        "--no-open", action="store_true",
+        help="Do not auto-open the report after writing.",
     )
     return p.parse_args(argv)
 
@@ -68,9 +73,16 @@ def main():
 
     names = store.company_names(ranked.index.tolist())
     html = report.render(ranked, names, factors_used)
-    report.write_report(html, str(out_dir / "report.html"))
-    report.write_csv(ranked, str(out_dir / "ranked_stocks.csv"))
-    print(f"Ranked {len(ranked)} tickers → {out_dir}/report.html")
+    report_path = (out_dir / "report.html").resolve()
+    report.write_report(html, str(report_path))
+    report.write_csv(ranked, str((out_dir / "ranked_stocks.csv").resolve()))
+    print(f"Ranked {len(ranked)} tickers → {report_path}")
+
+    if not args.no_open:
+        try:
+            webbrowser.open(report_path.as_uri())
+        except Exception as e:
+            print(f"(could not auto-open: {e})")
 
 
 if __name__ == "__main__":
