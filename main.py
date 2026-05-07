@@ -4,8 +4,9 @@ import warnings
 import webbrowser
 from pathlib import Path
 
-# Silence pandas's deprecated np.percentile(interpolation=...) call.
+# Silence noisy upstream deprecation warnings (pandas/np.percentile, sharing.quick_look).
 warnings.filterwarnings("ignore", message=".*interpolation.*", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*quick_look.*", category=DeprecationWarning)
 
 import analytics
 import report
@@ -15,15 +16,30 @@ from universe import load_sector_etf_map, ticker_to_sector
 
 
 def _open_file(path: Path) -> None:
-    """Best-effort open: Pyto's quick_look first, then webbrowser."""
+    """Best-effort open across Pyto and desktop."""
+    path_str = str(path)
+    # Pyto: prefer file_system module if it exposes a preview/quick_look.
+    try:
+        import file_system  # type: ignore[import-not-found]
+        for name in ("quick_look", "quick_look_url", "preview", "open"):
+            fn = getattr(file_system, name, None)
+            if callable(fn):
+                fn(path_str)
+                return
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    # Pyto legacy path (works but deprecated; warning is suppressed above).
     try:
         from sharing import quick_look  # type: ignore[import-not-found]
-        quick_look(str(path))
+        quick_look(path_str)
         return
     except ImportError:
         pass
-    except Exception as e:
-        print(f"(quick_look failed: {e})")
+    except Exception:
+        pass
+    # Desktop / generic fallback.
     try:
         webbrowser.open(path.as_uri())
     except Exception as e:

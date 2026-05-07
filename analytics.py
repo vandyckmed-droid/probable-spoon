@@ -184,6 +184,8 @@ def compute_quality(
     """Sector-level z on quality components, then composite quality_z."""
     rows: dict[str, dict] = {}
     for ticker, data in funds.items():
+        if ticker not in ticker_sector:
+            continue
         income = data.get("income") or []
         balance = data.get("balance") or []
         if not income or not balance:
@@ -244,6 +246,8 @@ def compute_value(
     """Sector-level z on value components, then composite value_z."""
     rows: dict[str, dict] = {}
     for ticker, data in funds.items():
+        if ticker not in ticker_sector:
+            continue
         income = data.get("income") or []
         balance = data.get("balance") or []
         cashflow = data.get("cashflow") or []
