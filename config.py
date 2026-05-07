@@ -1,3 +1,15 @@
+# =====================================================================
+# PASTE YOUR FMP API KEY BETWEEN THE QUOTES BELOW.
+# Get a key at https://financialmodelingprep.com/developer
+# =====================================================================
+FMP_API_KEY = ""
+# =====================================================================
+
+import os
+if not FMP_API_KEY:
+    FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+
+
 # Pipeline
 HISTORY_TRADING_DAYS = 756       # ~3 years
 MOMENTUM_MIN_OBS     = 252
@@ -53,6 +65,3 @@ PRICES_REFRESH_DAYS       = 5
 FUNDAMENTALS_REFRESH_DAYS = 30
 PROFILES_REFRESH_DAYS     = 30
 
-# API key from env
-import os
-FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
