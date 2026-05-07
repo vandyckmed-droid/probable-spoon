@@ -7,13 +7,21 @@ import pandas as pd
 _CSS = (
     "* { box-sizing: border-box; }"
     " body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;"
-    " font-size: 14px; padding: 12px; max-width: 100%; margin: 0; color: #222; }"
+    " font-size: 14px; padding: 12px; max-width: 100%; margin: 0;"
+    " color: #222; background: #fff; }"
     " table { border-collapse: collapse; width: 100%; max-width: 100%; }"
     " th, td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left;"
     " vertical-align: top; }"
     " th { background: #f7f7f7; font-weight: 600; }"
     " td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }"
+    " td.colored { color: #1a1a1a; }"  # composite cell text always dark on colored bg
     " .header { margin-bottom: 8px; color: #444; }"
+    " @media (prefers-color-scheme: dark) {"
+    "   body { color: #e6e6e6; background: #121212; }"
+    "   th { background: #1f1f1f; }"
+    "   th, td { border-bottom-color: #2a2a2a; }"
+    "   .header { color: #aaa; }"
+    " }"
 )
 
 
@@ -57,6 +65,7 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         comp_val = row.get("composite")
         composite = float(comp_val) if pd.notna(comp_val) else 0.0
         color = _composite_color(composite)
+        cls = "num colored" if color else "num"
         style = f' style="background:{color}"' if color else ""
         name = _escape(names.get(ticker, ticker))
         rows_html.append(
@@ -65,7 +74,7 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
             f"<td>{_escape(ticker)}</td>"
             f"<td>{name}</td>"
             f"<td>{sector}</td>"
-            f'<td class="num"{style}>{composite:.3f}</td>'
+            f'<td class="{cls}"{style}>{composite:.3f}</td>'
             "</tr>"
         )
 
