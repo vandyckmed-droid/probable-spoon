@@ -8,7 +8,10 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(
         description="Add tickers to the universe extras file."
     )
-    p.add_argument("tickers", nargs="+", help="Tickers to add (case-insensitive).")
+    p.add_argument(
+        "tickers", nargs="*",
+        help="Tickers to add (case-insensitive). Prompts if omitted.",
+    )
     p.add_argument(
         "--no-fetch", action="store_true",
         help="Skip data fetch after adding.",
@@ -18,9 +21,17 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    raw_input_tickers = list(args.tickers)
+    if not raw_input_tickers:
+        entered = input("Tickers (space- or comma-separated): ").strip()
+        raw_input_tickers = [t for t in entered.replace(",", " ").split() if t]
+        if not raw_input_tickers:
+            print("No tickers provided.")
+            return
+
     cleaned: list[str] = []
     seen: set[str] = set()
-    for t in args.tickers:
+    for t in raw_input_tickers:
         u = t.strip().upper()
         if u and u not in seen:
             seen.add(u)
