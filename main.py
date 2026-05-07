@@ -1,13 +1,33 @@
 """Orchestrator for the M/Q/V ranking pipeline. Cache-only by default."""
 import argparse
+import warnings
 import webbrowser
 from pathlib import Path
+
+# Silence pandas's deprecated np.percentile(interpolation=...) call.
+warnings.filterwarnings("ignore", message=".*interpolation.*", category=DeprecationWarning)
 
 import analytics
 import report
 import store
 from config import MARKET_TICKER
 from universe import load_sector_etf_map, ticker_to_sector
+
+
+def _open_file(path: Path) -> None:
+    """Best-effort open: Pyto's quick_look first, then webbrowser."""
+    try:
+        from sharing import quick_look  # type: ignore[import-not-found]
+        quick_look(str(path))
+        return
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"(quick_look failed: {e})")
+    try:
+        webbrowser.open(path.as_uri())
+    except Exception as e:
+        print(f"(could not auto-open: {e})")
 
 
 def parse_args(argv=None):
@@ -79,10 +99,7 @@ def main():
     print(f"Ranked {len(ranked)} tickers → {report_path}")
 
     if not args.no_open:
-        try:
-            webbrowser.open(report_path.as_uri())
-        except Exception as e:
-            print(f"(could not auto-open: {e})")
+        _open_file(report_path)
 
 
 if __name__ == "__main__":
