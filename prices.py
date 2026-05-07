@@ -113,7 +113,11 @@ def fetch_prices(
 
     new_p: dict[str, pd.Series] = {}
     new_v: dict[str, pd.Series] = {}
-    for t in to_fetch:
+    total = len(to_fetch)
+    if total:
+        print(f"fetching prices for {total} ticker(s)...")
+    for i, t in enumerate(to_fetch, 1):
+        print(f"  [{i}/{total}] {t}")
         p, v = _fetch_one(t, from_date)
         if not p.empty:
             new_p[t] = p

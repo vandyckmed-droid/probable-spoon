@@ -78,10 +78,14 @@ def fetch_profiles(
     if no_fetch:
         return data
 
+    candidates = list(dict.fromkeys(tickers))
+    to_fetch = [t for t in candidates if force or is_stale_for(cache, t)]
+    total = len(to_fetch)
+    if total:
+        print(f"fetching profiles for {total} ticker(s)...")
     changed = False
-    for t in dict.fromkeys(tickers):
-        if not force and not is_stale_for(cache, t):
-            continue
+    for i, t in enumerate(to_fetch, 1):
+        print(f"  [{i}/{total}] {t}")
         entry = _fetch_one(t)
         if entry is not None:
             data[t] = entry
