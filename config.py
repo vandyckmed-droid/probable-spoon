@@ -13,10 +13,10 @@ if not FMP_API_KEY:
 # Pipeline
 HISTORY_TRADING_DAYS = 756       # ~3 years
 MOMENTUM_MIN_OBS     = 252
-MOM_SKIP_DAYS        = 22
+MOM_SKIP_DAYS        = 21
 MOM_LONG_DAYS        = 252       # 12-1
 MOM_SHORT_DAYS       = 126       # 6-1
-MOM_REV_DAYS         = 22        # 1m reversal (diagnostic)
+MOM_REV_DAYS         = 21        # 1m reversal (diagnostic)
 TRADING_DAYS_PER_YEAR= 252
 
 # Winsorisation
