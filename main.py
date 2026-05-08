@@ -73,7 +73,12 @@ def parse_args(argv=None):
     p.add_argument(
         "--cash", type=float, default=None, metavar="DOLLARS",
         help=f"Cash to allocate across the top N (default {CASH_DEPLOYMENT}). "
-             "The Weight column renders as a rounded dollar amount.",
+             "Per-stock cash = weight × cash, rounded.",
+    )
+    p.add_argument(
+        "--sort", default="composite",
+        choices=["composite", "cash", "sector", "ticker"],
+        help="Initial sort order in the report (default composite).",
     )
     return p.parse_args(argv)
 
@@ -126,6 +131,17 @@ def main():
     factors_used["weighting_scheme"] = WEIGHTING_SCHEME
     factors_used["top_n"] = top_n
     factors_used["cash_deployment"] = float(cash)
+    factors_used["sort"] = args.sort
+
+    if args.sort == "cash":
+        ranked = ranked.sort_values("weight", ascending=False, kind="mergesort")
+    elif args.sort == "sector":
+        ranked = ranked.sort_values(
+            ["sector", "composite"], ascending=[True, False], kind="mergesort"
+        )
+    elif args.sort == "ticker":
+        ranked = ranked.sort_index(ascending=True, kind="mergesort")
+    # composite is already the default sort from build_ranked.
 
     names = store.company_names(ranked.index.tolist())
     html = report.render(ranked, names, factors_used)

@@ -25,37 +25,67 @@ body {
 .header {
   font-size: 12px; line-height: 1.5;
   color: #6b6b70; margin-bottom: 14px;
+  user-select: none; -webkit-user-select: none;
 }
 .header b { color: #1c1c1e; font-weight: 600; }
-.list-header {
+.header select {
+  font-family: inherit; font-size: 12px;
+  padding: 2px 8px; margin-left: 4px;
+  border-radius: 6px; border: 1px solid #d8d8db;
+  background: #fff; color: #1c1c1e;
+}
+
+.sticky-top {
   position: sticky; top: 0; z-index: 10;
-  background: #f5f5f7;
   margin: 0 -12px 8px;
-  padding: 10px 14px;
+  background: #f5f5f7;
+  border-bottom: 1px solid #e8e8eb;
+}
+.toolbar {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding: 8px 14px 6px;
+  align-items: center;
+  user-select: none; -webkit-user-select: none;
+}
+.toolbar-label {
+  font-size: 11px; font-weight: 600; color: #8e8e93;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin-right: 4px;
+}
+.sort-btn {
+  font: inherit; font-size: 12px; font-weight: 500;
+  border: 1px solid #d8d8db; background: #fff; color: #1c1c1e;
+  border-radius: 999px; padding: 4px 10px;
+  cursor: pointer;
+}
+.sort-btn.active { background: #1c1c1e; color: #fff; border-color: #1c1c1e; }
+
+.list-header {
+  padding: 6px 14px 8px;
   display: grid;
-  grid-template-columns: 30px 1fr auto;
+  grid-template-columns: 30px 1fr 80px;
   column-gap: 10px;
   font-size: 11px; font-weight: 600;
   color: #8e8e93;
   text-transform: uppercase; letter-spacing: 0.05em;
-  border-bottom: 1px solid #e8e8eb;
+  user-select: none; -webkit-user-select: none;
 }
 .list-header .col-rank { text-align: center; }
 .list-header .col-comp { text-align: right; }
-.list { display: flex; flex-direction: column; gap: 8px; }
+.list { display: flex; flex-direction: column; gap: 6px; }
 
 details.row {
   background: #ffffff;
-  border-radius: 14px;
+  border-radius: 10px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   overflow: hidden;
 }
 details.row > summary {
   list-style: none;
   cursor: pointer;
-  padding: 12px 14px;
+  padding: 10px 14px;
   display: grid;
-  grid-template-columns: 30px 1fr auto;
+  grid-template-columns: 30px 1fr 80px;
   grid-template-rows: auto auto;
   column-gap: 10px;
   row-gap: 2px;
@@ -76,13 +106,21 @@ details.row > summary::marker { display: none; }
 }
 .pill {
   grid-row: 1; grid-column: 3;
+  justify-self: end;
   font-variant-numeric: tabular-nums;
   font-weight: 600; font-size: 14px;
   padding: 3px 10px; border-radius: 999px;
   white-space: nowrap;
 }
+.cash-mini {
+  grid-row: 2; grid-column: 3;
+  justify-self: end; text-align: right;
+  font-size: 12px; color: #6b6b70;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .meta {
-  grid-row: 2; grid-column: 2 / span 2;
+  grid-row: 2; grid-column: 2;
   font-size: 13px; color: #6b6b70;
   display: flex; align-items: baseline; gap: 6px;
   min-width: 0;
@@ -170,8 +208,14 @@ details.methodology p {
   body { color: #ececec; background: #000000; }
   .header { color: #8e8e93; }
   .header b { color: #ececec; }
-  .list-header { background: #000000; border-bottom-color: #2c2c2e; color: #8e8e93; }
+  .header select { background: #1c1c1e; color: #ececec; border-color: #3a3a3c; }
+  .sticky-top { background: #000000; border-bottom-color: #2c2c2e; }
+  .toolbar-label { color: #8e8e93; }
+  .sort-btn { background: #1c1c1e; color: #ececec; border-color: #3a3a3c; }
+  .sort-btn.active { background: #ececec; color: #000; border-color: #ececec; }
+  .list-header { color: #8e8e93; }
   details.row { background: #1c1c1e; box-shadow: none; }
+  .cash-mini { color: #8e8e93; }
   .ticker { color: #ececec; }
   .meta { color: #8e8e93; }
   .meta .name { color: #ececec; }
@@ -237,6 +281,69 @@ def _short_name(name: str) -> str:
             break
     out = out.rstrip(",.- ").strip()
     return out or name
+
+
+_JS = """<script>
+(function () {
+  var list = document.querySelector('.list');
+  if (!list) return;
+  var rows = Array.prototype.slice.call(list.querySelectorAll('details.row'));
+  var btns = document.querySelectorAll('.sort-btn');
+  var cashSelect = document.getElementById('cashSelect');
+
+  function applySort(key) {
+    var asc = (key === 'sector' || key === 'ticker');
+    var sorted = rows.slice().sort(function (a, b) {
+      var av = a.dataset[key], bv = b.dataset[key];
+      if (key === 'composite' || key === 'cash') {
+        av = parseFloat(av); bv = parseFloat(bv);
+        if (!isFinite(av)) av = -Infinity;
+        if (!isFinite(bv)) bv = -Infinity;
+      } else {
+        av = (av || '').toLowerCase(); bv = (bv || '').toLowerCase();
+      }
+      if (av < bv) return asc ? -1 : 1;
+      if (av > bv) return asc ? 1 : -1;
+      return 0;
+    });
+    sorted.forEach(function (r) { list.appendChild(r); });
+    btns.forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-sort') === key);
+    });
+  }
+
+  function applyCash() {
+    if (!cashSelect) return;
+    var c = parseFloat(cashSelect.value);
+    if (!isFinite(c) || c <= 0) return;
+    rows.forEach(function (r) {
+      var w = parseFloat(r.dataset.weight) || 0;
+      var amt = w > 0 ? Math.round(w * c) : 0;
+      r.dataset.cash = amt;
+      var mini = r.querySelector('.cash-mini');
+      if (mini) mini.textContent = amt > 0 ? '$' + amt.toLocaleString() : '';
+      var line = r.querySelector('.cash-line');
+      if (line && amt > 0) {
+        line.innerHTML = 'Cash: <b>$' + amt.toLocaleString() + '</b> of $'
+          + Math.round(c).toLocaleString() + ' (' + (w * 100).toFixed(2) + '%)';
+      } else if (line) {
+        line.innerHTML = '';
+      }
+    });
+    var active = document.querySelector('.sort-btn.active');
+    if (active && active.getAttribute('data-sort') === 'cash') applySort('cash');
+  }
+
+  btns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      applySort(b.getAttribute('data-sort'));
+    });
+  });
+  if (cashSelect) cashSelect.addEventListener('change', applyCash);
+
+  applySort('{INITIAL}');
+})();
+</script>"""
 
 
 def _escape(text) -> str:
@@ -326,13 +433,20 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
     scheme = factors_used.get("weighting_scheme", "")
     top_n = factors_used.get("top_n")
     cash = float(factors_used.get("cash_deployment") or 0)
+    initial_sort = factors_used.get("sort", "composite")
 
     header_bits = [f"<b>{_format_weights(weights)}</b>"]
     if scheme and top_n:
         header_bits.append(f"Top {top_n} weighted by {scheme.replace('_', ' ')}")
-    if cash > 0:
-        header_bits.append(f"Cash deployed ${int(round(cash)):,}")
-    header_html = " &middot; ".join(header_bits)
+    cash_options = ""
+    for v in (25000, 30000, 35000, 40000):
+        sel = " selected" if int(round(cash)) == v else ""
+        cash_options += f'<option value="{v}"{sel}>${v:,}</option>'
+    cash_picker = (
+        '<span class="cash-picker">Cash deployed: '
+        f'<select id="cashSelect">{cash_options}</select></span>'
+    )
+    header_html = " &middot; ".join(header_bits) + " &middot; " + cash_picker
 
     rows_html = []
     for ticker, row in ranked_df.iterrows():
@@ -370,18 +484,29 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
             )
         )
 
+        cash_amt = int(round(weight * cash)) if weight > 0 and cash > 0 else 0
+        cash_mini_html = (
+            f'<span class="cash-mini">${cash_amt:,}</span>' if cash_amt > 0 else
+            '<span class="cash-mini"></span>'
+        )
         cash_block = ""
-        if weight > 0 and cash > 0:
-            cash_amt = int(round(weight * cash))
+        if cash_amt > 0:
             cash_block = (
                 f'<div class="cash-line">Cash: <b>${cash_amt:,}</b> '
                 f'of ${int(round(cash)):,} ({weight*100:.2f}%)</div>'
             )
 
         explanation = _explain(mom_z, qual_z, val_z)
+        comp_data = composite if composite is not None else ""
+        sector_raw = (row.get("sector") or "").replace('"', "")
 
         rows_html.append(
-            '<details class="row">'
+            f'<details class="row" '
+            f'data-composite="{comp_data}" '
+            f'data-cash="{cash_amt}" '
+            f'data-weight="{weight}" '
+            f'data-sector="{_escape(sector_raw)}" '
+            f'data-ticker="{ticker_esc}">'
             '<summary>'
             f'<span class="rank">{rank}</span>'
             f'<span class="ticker">{ticker_esc}</span>'
@@ -391,6 +516,7 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
             f'<span class="dot">·</span>'
             f'<span class="sector">{sector}</span>'
             f'</span>'
+            f'{cash_mini_html}'
             '</summary>'
             '<div class="expanded">'
             '<div class="divider"></div>'
@@ -461,13 +587,23 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         f'<style>{_CSS}</style>'
         '</head><body>'
         f'<div class="header">{header_html}</div>'
+        '<div class="sticky-top">'
+        '<div class="toolbar">'
+        '<span class="toolbar-label">Sort</span>'
+        '<button class="sort-btn" data-sort="composite">Composite</button>'
+        '<button class="sort-btn" data-sort="cash">Cash</button>'
+        '<button class="sort-btn" data-sort="sector">Sector</button>'
+        '<button class="sort-btn" data-sort="ticker">Ticker</button>'
+        '</div>'
         '<div class="list-header">'
         '<span class="col-rank">#</span>'
         '<span class="col-name">Stock</span>'
         '<span class="col-comp">Composite</span>'
         '</div>'
+        '</div>'
         f'<div class="list">{"".join(rows_html)}</div>'
         f'{methodology}'
+        f'{_JS.replace("{INITIAL}", initial_sort)}'
         '</body></html>'
     )
 

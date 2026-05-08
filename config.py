@@ -54,7 +54,7 @@ MIN_SECTOR_SIZE            = 5    # below this, fall back to universe-wide z
 TOP_N                = 20
 WEIGHTING_SCHEME     = "inverse_vol"   # equal | inverse_vol | erc
 WEIGHT_LOOKBACK_DAYS = 252
-CASH_DEPLOYMENT      = 25000           # default $; overridden by `main.py --cash`
+CASH_DEPLOYMENT      = 30000           # default $; overridden by `main.py --cash`
 
 # Universe / market
 MARKET_TICKER = "VTI"
