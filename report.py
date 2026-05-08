@@ -62,7 +62,8 @@ body {
 #sort-composite:checked ~ .sticky-top label[for="sort-composite"],
 #sort-cash:checked      ~ .sticky-top label[for="sort-cash"],
 #sort-sector:checked    ~ .sticky-top label[for="sort-sector"],
-#sort-ticker:checked    ~ .sticky-top label[for="sort-ticker"] {
+#sort-ticker:checked    ~ .sticky-top label[for="sort-ticker"],
+#sort-mktcap:checked    ~ .sticky-top label[for="sort-mktcap"] {
   background: #1c1c1e; color: #fff; border-color: #1c1c1e;
 }
 
@@ -381,7 +382,8 @@ details.row > summary::marker { display: none; }
   #sort-composite:checked ~ .sticky-top label[for="sort-composite"],
   #sort-cash:checked      ~ .sticky-top label[for="sort-cash"],
   #sort-sector:checked    ~ .sticky-top label[for="sort-sector"],
-  #sort-ticker:checked    ~ .sticky-top label[for="sort-ticker"] {
+  #sort-ticker:checked    ~ .sticky-top label[for="sort-ticker"],
+  #sort-mktcap:checked    ~ .sticky-top label[for="sort-mktcap"] {
     background: #ececec; color: #000; border-color: #ececec;
   }
   .section-body .list-header { color: #8e8e93; }
