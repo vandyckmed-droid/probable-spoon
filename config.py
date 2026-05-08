@@ -51,7 +51,7 @@ VALUE_FALLBACK_THRESHOLD   = 0.40
 MIN_SECTOR_SIZE            = 5    # below this, fall back to universe-wide z
 
 # Portfolio weighting (applied to the top N composite-ranked names)
-TOP_N                = 20
+TOP_N                = 25
 WEIGHTING_SCHEME     = "inverse_vol"   # equal | inverse_vol | erc
 WEIGHT_LOOKBACK_DAYS = 252
 CASH_DEPLOYMENT      = 30000           # default $; overridden by `main.py --cash`
