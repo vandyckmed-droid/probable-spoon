@@ -27,6 +27,21 @@ body {
   color: #6b6b70; margin-bottom: 14px;
 }
 .header b { color: #1c1c1e; font-weight: 600; }
+.list-header {
+  position: sticky; top: 0; z-index: 10;
+  background: #f5f5f7;
+  margin: 0 -12px 8px;
+  padding: 10px 14px;
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  column-gap: 10px;
+  font-size: 11px; font-weight: 600;
+  color: #8e8e93;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  border-bottom: 1px solid #e8e8eb;
+}
+.list-header .col-rank { text-align: center; }
+.list-header .col-comp { text-align: right; }
 .list { display: flex; flex-direction: column; gap: 8px; }
 
 details.row {
@@ -155,6 +170,7 @@ details.methodology p {
   body { color: #ececec; background: #000000; }
   .header { color: #8e8e93; }
   .header b { color: #ececec; }
+  .list-header { background: #000000; border-bottom-color: #2c2c2e; color: #8e8e93; }
   details.row { background: #1c1c1e; box-shadow: none; }
   .ticker { color: #ececec; }
   .meta { color: #8e8e93; }
@@ -445,6 +461,11 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         f'<style>{_CSS}</style>'
         '</head><body>'
         f'<div class="header">{header_html}</div>'
+        '<div class="list-header">'
+        '<span class="col-rank">#</span>'
+        '<span class="col-name">Stock</span>'
+        '<span class="col-comp">Composite</span>'
+        '</div>'
         f'<div class="list">{"".join(rows_html)}</div>'
         f'{methodology}'
         '</body></html>'
