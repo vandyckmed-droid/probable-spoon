@@ -295,6 +295,15 @@ details.row > summary::marker { display: none; }
   grid-row: 1; grid-column: 2;
   font-weight: 600; font-size: 17px;
   letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0;
+}
+.logo {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  border-radius: 5px;
+  object-fit: contain;
+  background: #f5f5f7;
 }
 .pill {
   grid-row: 1; grid-column: 3;
@@ -324,12 +333,6 @@ details.row > summary::marker { display: none; }
 }
 .meta .dot { flex: 0 0 auto; opacity: 0.5; }
 .meta .sector { flex: 0 0 auto; white-space: nowrap; }
-.meta .sector-sym {
-  display: inline-block;
-  margin-right: 2px;
-  font-size: 12px;
-  vertical-align: baseline;
-}
 .full-name {
   font-size: 13px; color: #6b6b70;
   margin-top: 10px; margin-bottom: -2px;
@@ -405,6 +408,7 @@ details.row > summary::marker { display: none; }
   .bt-cell.dd { color: #ff6e75; }
   .bt-caveat { color: #8e8e93; }
   details.row { background: #1c1c1e; box-shadow: none; }
+  .logo { background: #2c2c2e; }
   .hrp-row { background: #1c1c1e; box-shadow: none; }
   .hrp-row .ticker { color: #ececec; }
   .hrp-row .meta { color: #8e8e93; }
@@ -598,27 +602,6 @@ def _factor_row(label: str, weight, z) -> str:
     )
 
 
-_SECTOR_SYMBOLS = {
-    "Technology": "💻",
-    "Healthcare": "🏥",
-    "Financial Services": "🏦",
-    "Consumer Cyclical": "🛒",
-    "Consumer Defensive": "🥫",
-    "Industrials": "🏭",
-    "Energy": "⛽",
-    "Utilities": "⚡",
-    "Real Estate": "🏢",
-    "Basic Materials": "⛏",
-    "Communication Services": "📡",
-    "Semiconductors": "🔬",
-    "Aerospace & Defense": "✈️",
-}
-
-
-def _sector_symbol(sector: str) -> str:
-    return _SECTOR_SYMBOLS.get((sector or "").strip(), "•")
-
-
 def _show_classes(rank: int) -> str:
     bits = []
     if rank < 25:
@@ -635,6 +618,7 @@ def _row_html(
     scheme_scales: dict,
     rank_composite: dict, rank_cash: dict, rank_sector: dict,
     rank_ticker: dict, rank_mktcap: dict,
+    logos: dict | None = None,
 ) -> str:
     """Render one <details class=row> card for a single ticker.
 
@@ -644,9 +628,7 @@ def _row_html(
     """
     rank_val = row.get("rank")
     rank = str(int(rank_val)) if pd.notna(rank_val) else "—"
-    sector_raw = row.get("sector") or "—"
-    sector_sym = _sector_symbol(sector_raw)
-    sector = _escape(sector_raw)
+    sector = _escape(row.get("sector") or "—")
     comp_val = row.get("composite")
     composite = float(comp_val) if pd.notna(comp_val) else None
     pill_cls = _pill_class(composite)
@@ -720,17 +702,26 @@ def _row_html(
         f"--r-mkt:{rank_mktcap.get(ticker, 0)};"
     )
     show_cls = _show_classes(rank_composite.get(ticker, 9999))
+
+    logo_url = (logos or {}).get(ticker, "")
+    logo_html = ""
+    if logo_url and rank_composite.get(ticker, 9999) < 50:
+        logo_html = (
+            f'<img class="logo" src="{_escape(logo_url)}" alt="" '
+            f'loading="lazy" referrerpolicy="no-referrer">'
+        )
+
     return (
         f'<details class="row {show_cls}" style="{order_style}" '
         f'data-eq="{eq_w}" data-ivp="{ivp_w}" data-hrp="{hrp_w}">'
         '<summary>'
         f'<span class="rank">{rank}</span>'
-        f'<span class="ticker">{ticker_esc}</span>'
+        f'<span class="ticker">{logo_html}{ticker_esc}</span>'
         f'<span class="pill {pill_cls}">{composite_text}</span>'
         f'<span class="meta">'
         f'<span class="name">{name}</span>'
         f'<span class="dot">·</span>'
-        f'<span class="sector"><span class="sector-sym">{sector_sym}</span> {sector}</span>'
+        f'<span class="sector">{sector}</span>'
         f'</span>'
         f'{cash_minis}'
         '</summary>'
@@ -1010,7 +1001,10 @@ except ImportError:
     MARKET_TICKER_LABEL = "Market"
 
 
-def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
+def render(
+    ranked_df: pd.DataFrame, names: dict, factors_used: dict,
+    logos: dict | None = None,
+) -> str:
     weights = factors_used.get("weights", {})
     scheme = factors_used.get("weighting_scheme", "")
     top_n = factors_used.get("top_n")
@@ -1086,7 +1080,8 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
     # rest just show composite.
     rows_html = "".join(
         _row_html(t, r, names, weights, cash, scheme_scales,
-                  rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap)
+                  rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap,
+                  logos=logos)
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)
