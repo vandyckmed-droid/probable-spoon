@@ -52,13 +52,24 @@ body {
   text-transform: uppercase; letter-spacing: 0.05em;
   margin-right: 4px;
 }
+.sort-radio { position: absolute; opacity: 0; pointer-events: none; }
 .sort-btn {
   font: inherit; font-size: 12px; font-weight: 500;
   border: 1px solid #d8d8db; background: #fff; color: #1c1c1e;
   border-radius: 999px; padding: 4px 10px;
-  cursor: pointer;
+  cursor: pointer; user-select: none; -webkit-user-select: none;
 }
-.sort-btn.active { background: #1c1c1e; color: #fff; border-color: #1c1c1e; }
+#sort-composite:checked ~ .sticky-top label[for="sort-composite"],
+#sort-cash:checked      ~ .sticky-top label[for="sort-cash"],
+#sort-sector:checked    ~ .sticky-top label[for="sort-sector"],
+#sort-ticker:checked    ~ .sticky-top label[for="sort-ticker"] {
+  background: #1c1c1e; color: #fff; border-color: #1c1c1e;
+}
+
+#sort-composite:checked ~ .list .row { order: var(--r-c, 0); }
+#sort-cash:checked      ~ .list .row { order: var(--r-cash, 0); }
+#sort-sector:checked    ~ .list .row { order: var(--r-sec, 0); }
+#sort-ticker:checked    ~ .list .row { order: var(--r-tick, 0); }
 
 .list-header {
   padding: 6px 14px 8px;
@@ -212,7 +223,12 @@ details.methodology p {
   .sticky-top { background: #000000; border-bottom-color: #2c2c2e; }
   .toolbar-label { color: #8e8e93; }
   .sort-btn { background: #1c1c1e; color: #ececec; border-color: #3a3a3c; }
-  .sort-btn.active { background: #ececec; color: #000; border-color: #ececec; }
+  #sort-composite:checked ~ .sticky-top label[for="sort-composite"],
+  #sort-cash:checked      ~ .sticky-top label[for="sort-cash"],
+  #sort-sector:checked    ~ .sticky-top label[for="sort-sector"],
+  #sort-ticker:checked    ~ .sticky-top label[for="sort-ticker"] {
+    background: #ececec; color: #000; border-color: #ececec;
+  }
   .list-header { color: #8e8e93; }
   details.row { background: #1c1c1e; box-shadow: none; }
   .cash-mini { color: #8e8e93; }
@@ -285,41 +301,15 @@ def _short_name(name: str) -> str:
 
 _JS = """<script>
 (function () {
-  var list = document.querySelector('.list');
-  if (!list) return;
-  var rows = Array.prototype.slice.call(list.querySelectorAll('details.row'));
-  var btns = document.querySelectorAll('.sort-btn');
   var cashSelect = document.getElementById('cashSelect');
-
-  function applySort(key) {
-    var asc = (key === 'sector' || key === 'ticker');
-    var sorted = rows.slice().sort(function (a, b) {
-      var av = a.dataset[key], bv = b.dataset[key];
-      if (key === 'composite' || key === 'cash') {
-        av = parseFloat(av); bv = parseFloat(bv);
-        if (!isFinite(av)) av = -Infinity;
-        if (!isFinite(bv)) bv = -Infinity;
-      } else {
-        av = (av || '').toLowerCase(); bv = (bv || '').toLowerCase();
-      }
-      if (av < bv) return asc ? -1 : 1;
-      if (av > bv) return asc ? 1 : -1;
-      return 0;
-    });
-    sorted.forEach(function (r) { list.appendChild(r); });
-    btns.forEach(function (b) {
-      b.classList.toggle('active', b.getAttribute('data-sort') === key);
-    });
-  }
-
-  function applyCash() {
-    if (!cashSelect) return;
+  if (!cashSelect) return;
+  var rows = document.querySelectorAll('details.row');
+  cashSelect.addEventListener('change', function () {
     var c = parseFloat(cashSelect.value);
     if (!isFinite(c) || c <= 0) return;
     rows.forEach(function (r) {
       var w = parseFloat(r.dataset.weight) || 0;
       var amt = w > 0 ? Math.round(w * c) : 0;
-      r.dataset.cash = amt;
       var mini = r.querySelector('.cash-mini');
       if (mini) mini.textContent = amt > 0 ? '$' + amt.toLocaleString() : '';
       var line = r.querySelector('.cash-line');
@@ -330,18 +320,7 @@ _JS = """<script>
         line.innerHTML = '';
       }
     });
-    var active = document.querySelector('.sort-btn.active');
-    if (active && active.getAttribute('data-sort') === 'cash') applySort('cash');
-  }
-
-  btns.forEach(function (b) {
-    b.addEventListener('click', function () {
-      applySort(b.getAttribute('data-sort'));
-    });
   });
-  if (cashSelect) cashSelect.addEventListener('change', applyCash);
-
-  applySort('{INITIAL}');
 })();
 </script>"""
 
@@ -435,6 +414,28 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
     cash = float(factors_used.get("cash_deployment") or 0)
     initial_sort = factors_used.get("sort", "composite")
 
+    # Pre-compute the order index for each ticker under each sort key, so the
+    # CSS-only sort can swap which `order` value drives the flex layout.
+    if not ranked_df.empty:
+        idx_composite = ranked_df.sort_values(
+            "composite", ascending=False, kind="mergesort"
+        ).index.tolist()
+        idx_cash = ranked_df.sort_values(
+            "weight", ascending=False, kind="mergesort"
+        ).index.tolist()
+        idx_sector = ranked_df.sort_values(
+            ["sector", "composite"], ascending=[True, False], kind="mergesort"
+        ).index.tolist()
+        idx_ticker = ranked_df.sort_index(
+            ascending=True, kind="mergesort"
+        ).index.tolist()
+    else:
+        idx_composite = idx_cash = idx_sector = idx_ticker = []
+    rank_composite = {t: i for i, t in enumerate(idx_composite)}
+    rank_cash = {t: i for i, t in enumerate(idx_cash)}
+    rank_sector = {t: i for i, t in enumerate(idx_sector)}
+    rank_ticker = {t: i for i, t in enumerate(idx_ticker)}
+
     header_bits = [f"<b>{_format_weights(weights)}</b>"]
     if scheme and top_n:
         header_bits.append(f"Top {top_n} weighted by {scheme.replace('_', ' ')}")
@@ -500,13 +501,15 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         comp_data = composite if composite is not None else ""
         sector_raw = (row.get("sector") or "").replace('"', "")
 
+        order_style = (
+            f"--r-c:{rank_composite.get(ticker, 0)};"
+            f"--r-cash:{rank_cash.get(ticker, 0)};"
+            f"--r-sec:{rank_sector.get(ticker, 0)};"
+            f"--r-tick:{rank_ticker.get(ticker, 0)};"
+        )
         rows_html.append(
-            f'<details class="row" '
-            f'data-composite="{comp_data}" '
-            f'data-cash="{cash_amt}" '
-            f'data-weight="{weight}" '
-            f'data-sector="{_escape(sector_raw)}" '
-            f'data-ticker="{ticker_esc}">'
+            f'<details class="row" style="{order_style}" '
+            f'data-weight="{weight}">'
             '<summary>'
             f'<span class="rank">{rank}</span>'
             f'<span class="ticker">{ticker_esc}</span>'
@@ -586,14 +589,20 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         '<title>M/Q/V Ranking</title>'
         f'<style>{_CSS}</style>'
         '</head><body>'
+        # Hidden sort radios FIRST so the CSS general-sibling selector reaches
+        # both the .sticky-top toolbar and the .list rows below.
+        f'<input type="radio" name="sort" id="sort-composite" class="sort-radio"{ " checked" if initial_sort == "composite" else "" }>'
+        f'<input type="radio" name="sort" id="sort-cash" class="sort-radio"{ " checked" if initial_sort == "cash" else "" }>'
+        f'<input type="radio" name="sort" id="sort-sector" class="sort-radio"{ " checked" if initial_sort == "sector" else "" }>'
+        f'<input type="radio" name="sort" id="sort-ticker" class="sort-radio"{ " checked" if initial_sort == "ticker" else "" }>'
         f'<div class="header">{header_html}</div>'
         '<div class="sticky-top">'
         '<div class="toolbar">'
         '<span class="toolbar-label">Sort</span>'
-        '<button class="sort-btn" data-sort="composite">Composite</button>'
-        '<button class="sort-btn" data-sort="cash">Cash</button>'
-        '<button class="sort-btn" data-sort="sector">Sector</button>'
-        '<button class="sort-btn" data-sort="ticker">Ticker</button>'
+        '<label for="sort-composite" class="sort-btn">Composite</label>'
+        '<label for="sort-cash" class="sort-btn">Cash</label>'
+        '<label for="sort-sector" class="sort-btn">Sector</label>'
+        '<label for="sort-ticker" class="sort-btn">Ticker</label>'
         '</div>'
         '<div class="list-header">'
         '<span class="col-rank">#</span>'
@@ -603,7 +612,7 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         '</div>'
         f'<div class="list">{"".join(rows_html)}</div>'
         f'{methodology}'
-        f'{_JS.replace("{INITIAL}", initial_sort)}'
+        f'{_JS}'
         '</body></html>'
     )
 
