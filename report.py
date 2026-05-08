@@ -885,6 +885,9 @@ def render(
     header_bits = [f"<b>{_format_weights(weights)}</b>"]
     if scheme and top_n:
         header_bits.append(f"Top {top_n} weighted by {scheme.replace('_', ' ')}")
+    prices_as_of = factors_used.get("prices_as_of")
+    if prices_as_of:
+        header_bits.append(f"Prices as of {_escape(prices_as_of)}")
     cash_options = ""
     for v in (25000, 30000, 35000, 40000):
         sel = " selected" if int(round(cash)) == v else ""

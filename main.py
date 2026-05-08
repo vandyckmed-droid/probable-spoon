@@ -177,6 +177,15 @@ def main():
     factors_used["sort"] = args.sort
     factors_used["universe_total"] = len(ranked)
 
+    # Surface the latest price date so stale data is visible in the report
+    # header. Uses the last index of the cached prices frame as the canonical
+    # report-level "as of" date.
+    if not prices_df.empty:
+        last_idx = prices_df.index[-1]
+        factors_used["prices_as_of"] = (
+            str(last_idx.date()) if hasattr(last_idx, "date") else str(last_idx)
+        )
+
     if args.limit and args.limit > 0 and len(ranked) > args.limit:
         display_ranked = ranked.head(args.limit).copy()
         factors_used["display_limit"] = args.limit
