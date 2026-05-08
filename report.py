@@ -291,6 +291,18 @@ details.row > summary::marker { display: none; }
 }
 .cash-line b { font-weight: 600; }
 
+.sparkline-row { margin: 10px 0 6px; }
+.sparkline-cap {
+  font-size: 11px; font-weight: 600;
+  color: #8e8e93;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.sparkline {
+  display: block;
+  width: 100%; height: 40px;
+}
+
 .pill.up-strong   { background: #2ecc71; color: #0d3a1f; }
 .pill.up-light    { background: #d4f1e0; color: #0d3a1f; }
 .pill.down-strong { background: #e74c3c; color: #4a0e08; }
@@ -509,6 +521,34 @@ def _factor_row(label: str, weight, z) -> str:
     )
 
 
+def _sparkline_svg(values: list[float], width: int = 280, height: int = 40) -> str:
+    """Inline SVG polyline over a normalised price series.
+
+    Stroke is green when the last point >= the first, red otherwise.
+    Returns an empty string for too-short or degenerate input.
+    """
+    if not values or len(values) < 2:
+        return ""
+    vmin, vmax = min(values), max(values)
+    rng = vmax - vmin
+    if rng <= 0:
+        return ""
+    n = len(values)
+    pts = " ".join(
+        f"{i * width / (n - 1):.1f},{height - (v - vmin) / rng * (height - 2) - 1:.1f}"
+        for i, v in enumerate(values)
+    )
+    color = "#2ecc71" if values[-1] >= values[0] else "#e74c3c"
+    return (
+        f'<svg class="sparkline" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="none" '
+        f'xmlns="http://www.w3.org/2000/svg">'
+        f'<polyline fill="none" stroke="{color}" stroke-width="1.5" '
+        f'stroke-linejoin="round" stroke-linecap="round" points="{pts}"/>'
+        '</svg>'
+    )
+
+
 def _show_classes(rank: int) -> str:
     bits = []
     if rank < 25:
@@ -525,6 +565,7 @@ def _row_html(
     scheme_scales: dict,
     rank_composite: dict, rank_cash: dict, rank_sector: dict,
     rank_ticker: dict, rank_mktcap: dict,
+    sparklines: dict | None = None,
 ) -> str:
     """Render one <details class=row> card for a single ticker.
 
@@ -600,6 +641,18 @@ def _row_html(
     )
 
     explanation = _explain(mom_z, qual_z, val_z)
+
+    sparkline_block = ""
+    if sparklines and rank_composite.get(ticker, 9999) < 25:
+        svg = _sparkline_svg(sparklines.get(ticker) or [])
+        if svg:
+            sparkline_block = (
+                '<div class="sparkline-row">'
+                '<div class="sparkline-cap">21-day price</div>'
+                f'{svg}'
+                '</div>'
+            )
+
     order_style = (
         f"--r-c:{rank_composite.get(ticker, 0)};"
         f"--r-cash:{rank_cash.get(ticker, 0)};"
@@ -625,6 +678,7 @@ def _row_html(
         '<div class="expanded">'
         '<div class="divider"></div>'
         f'{full_name_block}'
+        f'{sparkline_block}'
         f'<div class="factors">{factor_rows}</div>'
         f'<div class="explain">{explanation}</div>'
         f'{weight_lines}'
@@ -830,6 +884,7 @@ except ImportError:
 
 def render(
     ranked_df: pd.DataFrame, names: dict, factors_used: dict,
+    sparklines: dict | None = None,
 ) -> str:
     weights = factors_used.get("weights", {})
     scheme = factors_used.get("weighting_scheme", "")
@@ -909,7 +964,8 @@ def render(
     # rest just show composite.
     rows_html = "".join(
         _row_html(t, r, names, weights, cash, scheme_scales,
-                  rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap)
+                  rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap,
+                  sparklines=sparklines)
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)

@@ -129,6 +129,14 @@ def main():
     top_n = min(TOP_N, len(ranked))
     top_tickers = ranked.head(top_n).index.tolist()
 
+    # 21-day price snapshots for the top-N cards (used by the sparkline).
+    sparklines: dict[str, list[float]] = {}
+    for t in top_tickers:
+        if t in prices_df.columns:
+            s = prices_df[t].dropna().tail(21)
+            if len(s) >= 5:
+                sparklines[t] = [float(x) for x in s.tolist()]
+
     # Three weighting schemes for the toggle. HRP runs on residual returns
     # (market- and sector-orthogonalised); equal and inverse_vol run on raw
     # daily log returns over the standard 252-day window.
@@ -210,7 +218,7 @@ def main():
     # composite is already the default sort from build_ranked.
 
     names = store.company_names(display_ranked.index.tolist())
-    html = report.render(display_ranked, names, factors_used)
+    html = report.render(display_ranked, names, factors_used, sparklines=sparklines)
     report_path = (out_dir / "report.html").resolve()
     report.write_report(html, str(report_path))
     # CSV always carries the full ranked frame, untruncated and unsorted-by-flag.
