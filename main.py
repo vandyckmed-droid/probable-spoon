@@ -14,7 +14,7 @@ import store
 import weights as weights_mod
 from config import (
     MARKET_TICKER, TOP_N, WEIGHTING_SCHEME, WEIGHT_LOOKBACK_DAYS,
-    CASH_DEPLOYMENT, BETA_LOOKBACK_DAYS,
+    CASH_DEPLOYMENT, BETA_LOOKBACK_DAYS, VOL_TARGET,
 )
 from universe import load_sector_etf_map, ticker_to_sector
 
@@ -77,7 +77,7 @@ def parse_args(argv=None):
     )
     p.add_argument(
         "--sort", default="composite",
-        choices=["composite", "cash", "sector", "ticker"],
+        choices=["composite", "cash", "sector", "ticker", "mktcap"],
         help="Initial sort order in the report (default composite).",
     )
     p.add_argument(
@@ -128,26 +128,42 @@ def main():
 
     top_n = min(TOP_N, len(ranked))
     top_tickers = ranked.head(top_n).index.tolist()
-    w = weights_mod.compute_weights(
-        WEIGHTING_SCHEME, returns, top_tickers, WEIGHT_LOOKBACK_DAYS,
-    )
-    ranked["weight"] = ranked.index.map(w).fillna(0.0)
 
-    # Weighted Top 25: HRP on residual returns over the beta lookback window.
-    # stock_resid is preferred over raw `returns` so the covariance reflects
-    # market- and sector-orthogonalised stock returns; falls back to raw
-    # returns automatically inside hrp_weights if a column is missing.
+    # Three weighting schemes for the toggle. HRP runs on residual returns
+    # (market- and sector-orthogonalised); equal and inverse_vol run on raw
+    # daily log returns over the standard 252-day window.
+    equal_w = weights_mod.compute_weights("equal", returns, top_tickers)
+    ivp_w = weights_mod.compute_weights(
+        "inverse_vol", returns, top_tickers, WEIGHT_LOOKBACK_DAYS,
+    )
     hrp_input = stock_resid if not stock_resid.empty else returns
     hrp_w = weights_mod.compute_weights(
         "hrp", hrp_input, top_tickers, BETA_LOOKBACK_DAYS,
     )
+    ranked["equal_weight"] = ranked.index.map(equal_w).fillna(0.0)
+    ranked["ivp_weight"] = ranked.index.map(ivp_w).fillna(0.0)
     ranked["hrp_weight"] = ranked.index.map(hrp_w).fillna(0.0)
+
+    # Realised portfolio vol per scheme + vol-targeting scale.
+    sigma_eq = weights_mod.portfolio_volatility(returns, equal_w, WEIGHT_LOOKBACK_DAYS)
+    sigma_ivp = weights_mod.portfolio_volatility(returns, ivp_w, WEIGHT_LOOKBACK_DAYS)
+    sigma_hrp = weights_mod.portfolio_volatility(returns, hrp_w, WEIGHT_LOOKBACK_DAYS)
+    scale_eq = weights_mod.vol_target_scale(sigma_eq, VOL_TARGET)
+    scale_ivp = weights_mod.vol_target_scale(sigma_ivp, VOL_TARGET)
+    scale_hrp = weights_mod.vol_target_scale(sigma_hrp, VOL_TARGET)
 
     cash = args.cash if args.cash is not None else CASH_DEPLOYMENT
     factors_used["weighting_scheme"] = WEIGHTING_SCHEME
     factors_used["top_n"] = top_n
     factors_used["cash_deployment"] = float(cash)
     factors_used["hrp_lookback"] = BETA_LOOKBACK_DAYS
+    factors_used["vol_target"] = VOL_TARGET
+    factors_used["scheme_vols"] = {
+        "equal": sigma_eq, "ivp": sigma_ivp, "hrp": sigma_hrp,
+    }
+    factors_used["scheme_scales"] = {
+        "equal": scale_eq, "ivp": scale_ivp, "hrp": scale_hrp,
+    }
     factors_used["sort"] = args.sort
     factors_used["universe_total"] = len(ranked)
 
@@ -160,7 +176,7 @@ def main():
 
     if args.sort == "cash":
         display_ranked = display_ranked.sort_values(
-            "weight", ascending=False, kind="mergesort"
+            "hrp_weight", ascending=False, kind="mergesort"
         )
     elif args.sort == "sector":
         display_ranked = display_ranked.sort_values(
@@ -168,6 +184,10 @@ def main():
         )
     elif args.sort == "ticker":
         display_ranked = display_ranked.sort_index(ascending=True, kind="mergesort")
+    elif args.sort == "mktcap":
+        display_ranked = display_ranked.sort_values(
+            "market_cap", ascending=False, kind="mergesort", na_position="last"
+        )
     # composite is already the default sort from build_ranked.
 
     names = store.company_names(display_ranked.index.tolist())

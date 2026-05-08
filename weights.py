@@ -238,3 +238,34 @@ def compute_weights(
     if key == "hrp":
         return hrp_weights(returns, tickers, lookback)
     return inverse_vol_weights(returns, tickers, lookback)
+
+
+def portfolio_volatility(
+    returns: pd.DataFrame, weights_series: pd.Series, lookback: int = 252,
+) -> float:
+    """Annualised portfolio sigma using sample covariance over the lookback."""
+    if weights_series is None or weights_series.empty:
+        return 0.0
+    available = [t for t in weights_series.index if t in returns.columns]
+    if len(available) < 2:
+        return 0.0
+    window = returns[available].tail(lookback).dropna()
+    if window.shape[0] < 30:
+        return 0.0
+    cov = window.cov().to_numpy()
+    if not np.all(np.isfinite(cov)):
+        return 0.0
+    w = weights_series.loc[available].to_numpy()
+    var = float(w @ cov @ w)
+    if not np.isfinite(var) or var <= 0:
+        return 0.0
+    return float(np.sqrt(var) * np.sqrt(_TRADING_DAYS))
+
+
+def vol_target_scale(realized: float, target: float | None) -> float:
+    """min(1, target/realized) when both finite and positive; else 1.0."""
+    if target is None or target <= 0 or realized <= 0:
+        return 1.0
+    if not np.isfinite(realized) or not np.isfinite(target):
+        return 1.0
+    return float(min(1.0, target / realized))

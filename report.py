@@ -70,10 +70,23 @@ body {
 #sort-cash:checked      ~ .section .list .row { order: var(--r-cash, 0); }
 #sort-sector:checked    ~ .section .list .row { order: var(--r-sec, 0); }
 #sort-ticker:checked    ~ .section .list .row { order: var(--r-tick, 0); }
-#sort-composite:checked ~ .section .list .hrp-row { order: var(--r-c, 0); }
-#sort-cash:checked      ~ .section .list .hrp-row { order: var(--r-cash, 0); }
-#sort-sector:checked    ~ .section .list .hrp-row { order: var(--r-sec, 0); }
-#sort-ticker:checked    ~ .section .list .hrp-row { order: var(--r-tick, 0); }
+#sort-mktcap:checked    ~ .section .list .row { order: var(--r-mkt, 0); }
+
+/* Weighting scheme toggle: hide all three cash-mini variants by default,
+   then reveal whichever one the active radio matches. */
+.cm-eq, .cm-ivp, .cm-hrp,
+.wl-eq, .wl-ivp, .wl-hrp { display: none; }
+#wt-equal:checked ~ .section .cm-eq,
+#wt-equal:checked ~ .section .wl-eq { display: block; }
+#wt-ivp:checked   ~ .section .cm-ivp,
+#wt-ivp:checked   ~ .section .wl-ivp { display: block; }
+#wt-hrp:checked   ~ .section .cm-hrp,
+#wt-hrp:checked   ~ .section .wl-hrp { display: block; }
+#wt-equal:checked ~ .section label[for="wt-equal"],
+#wt-ivp:checked   ~ .section label[for="wt-ivp"],
+#wt-hrp:checked   ~ .section label[for="wt-hrp"] {
+  background: #1c1c1e; color: #fff; border-color: #1c1c1e;
+}
 
 .list { display: flex; flex-direction: column; gap: 6px; }
 
@@ -105,6 +118,12 @@ details.section[open] > summary::after { transform: rotate(-135deg); }
 .section-title { font-size: 16px; font-weight: 600; color: #1c1c1e; }
 .section-subtitle { font-size: 12px; color: #6b6b70; margin-top: 2px; }
 .section-body { padding: 0 12px 12px; }
+.weighting-toggle {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  align-items: center;
+  padding: 4px 4px 10px;
+  user-select: none; -webkit-user-select: none;
+}
 .section-body .list-header {
   padding: 4px 4px 8px;
   display: grid;
@@ -406,23 +425,35 @@ _JS = """<script>
 (function () {
   var cashSelect = document.getElementById('cashSelect');
   if (!cashSelect) return;
+  var SCALE = { eq: __SCALE_EQ__, ivp: __SCALE_IVP__, hrp: __SCALE_HRP__ };
   var rows = document.querySelectorAll('details.row');
+  function updateOne(r, baseCash) {
+    var weights = {
+      eq:  parseFloat(r.dataset.eq) || 0,
+      ivp: parseFloat(r.dataset.ivp) || 0,
+      hrp: parseFloat(r.dataset.hrp) || 0
+    };
+    ['eq', 'ivp', 'hrp'].forEach(function (k) {
+      var w = weights[k];
+      var effective = baseCash * SCALE[k];
+      var amt = w > 0 ? Math.round(w * effective) : 0;
+      var mini = r.querySelector('.cm-' + k);
+      if (mini) mini.textContent = amt > 0 ? '$' + amt.toLocaleString() : '';
+      var line = r.querySelector('.wl-' + k);
+      if (line) {
+        if (w > 0) {
+          line.innerHTML = 'Cash: <b>$' + amt.toLocaleString() + '</b> of $'
+            + Math.round(effective).toLocaleString() + ' (' + (w * 100).toFixed(2) + '%)';
+        } else {
+          line.innerHTML = '';
+        }
+      }
+    });
+  }
   cashSelect.addEventListener('change', function () {
     var c = parseFloat(cashSelect.value);
     if (!isFinite(c) || c <= 0) return;
-    rows.forEach(function (r) {
-      var w = parseFloat(r.dataset.weight) || 0;
-      var amt = w > 0 ? Math.round(w * c) : 0;
-      var mini = r.querySelector('.cash-mini');
-      if (mini) mini.textContent = amt > 0 ? '$' + amt.toLocaleString() : '';
-      var line = r.querySelector('.cash-line');
-      if (line && amt > 0) {
-        line.innerHTML = 'Cash: <b>$' + amt.toLocaleString() + '</b> of $'
-          + Math.round(c).toLocaleString() + ' (' + (w * 100).toFixed(2) + '%)';
-      } else if (line) {
-        line.innerHTML = '';
-      }
-    });
+    rows.forEach(function (r) { updateOne(r, c); });
   });
 })();
 </script>"""
@@ -512,9 +543,16 @@ def _factor_row(label: str, weight, z) -> str:
 
 def _row_html(
     ticker, row, names: dict, weights: dict, cash: float,
-    rank_composite: dict, rank_cash: dict, rank_sector: dict, rank_ticker: dict,
+    scheme_scales: dict,
+    rank_composite: dict, rank_cash: dict, rank_sector: dict,
+    rank_ticker: dict, rank_mktcap: dict,
 ) -> str:
-    """Render one <details class=row> card for a single ticker."""
+    """Render one <details class=row> card for a single ticker.
+
+    Each row carries three weight values (equal / ivp / hrp) and three cash
+    text spans. CSS toggles which scheme is shown based on the active
+    weighting radio.
+    """
     rank_val = row.get("rank")
     rank = str(int(rank_val)) if pd.notna(rank_val) else "—"
     sector = _escape(row.get("sector") or "—")
@@ -531,13 +569,31 @@ def _row_html(
     if short_name != full_name:
         full_name_block = f'<div class="full-name">{_escape(full_name)}</div>'
 
-    weight_val = row.get("weight")
-    weight = float(weight_val) if pd.notna(weight_val) else 0.0
+    eq_w = float(row.get("equal_weight") or 0.0)
+    ivp_w = float(row.get("ivp_weight") or 0.0)
+    hrp_w = float(row.get("hrp_weight") or 0.0)
+
+    cash_eq = cash * scheme_scales.get("equal", 1.0)
+    cash_ivp = cash * scheme_scales.get("ivp", 1.0)
+    cash_hrp = cash * scheme_scales.get("hrp", 1.0)
+    amt_eq = int(round(eq_w * cash_eq)) if eq_w > 0 else 0
+    amt_ivp = int(round(ivp_w * cash_ivp)) if ivp_w > 0 else 0
+    amt_hrp = int(round(hrp_w * cash_hrp)) if hrp_w > 0 else 0
+
+    def _cm(cls, amt):
+        return f'<span class="{cls}">${amt:,}</span>' if amt > 0 else f'<span class="{cls}"></span>'
+
+    cash_minis = (
+        '<span class="cash-mini">'
+        + _cm("cm-eq", amt_eq)
+        + _cm("cm-ivp", amt_ivp)
+        + _cm("cm-hrp", amt_hrp)
+        + '</span>'
+    )
 
     mom_z = row.get("residual_momentum_z")
     qual_z = row.get("quality_z")
     val_z = row.get("value_z")
-
     factor_rows = (
         _factor_row("Momentum", weights.get("momentum"), mom_z)
         + _factor_row("Quality", weights.get("quality"), qual_z)
@@ -549,17 +605,20 @@ def _row_html(
         )
     )
 
-    cash_amt = int(round(weight * cash)) if weight > 0 and cash > 0 else 0
-    cash_mini_html = (
-        f'<span class="cash-mini">${cash_amt:,}</span>' if cash_amt > 0
-        else '<span class="cash-mini"></span>'
-    )
-    cash_block = ""
-    if cash_amt > 0:
-        cash_block = (
-            f'<div class="cash-line">Cash: <b>${cash_amt:,}</b> '
-            f'of ${int(round(cash)):,} ({weight*100:.2f}%)</div>'
+    def _wl(cls, w, amt, cash_eff):
+        if w <= 0:
+            return f'<div class="{cls} cash-line"></div>'
+        return (
+            f'<div class="{cls} cash-line">'
+            f'Cash: <b>${amt:,}</b> of ${int(round(cash_eff)):,} '
+            f'({w*100:.2f}%)</div>'
         )
+
+    weight_lines = (
+        _wl("wl-eq", eq_w, amt_eq, cash_eq)
+        + _wl("wl-ivp", ivp_w, amt_ivp, cash_ivp)
+        + _wl("wl-hrp", hrp_w, amt_hrp, cash_hrp)
+    )
 
     explanation = _explain(mom_z, qual_z, val_z)
     order_style = (
@@ -567,9 +626,11 @@ def _row_html(
         f"--r-cash:{rank_cash.get(ticker, 0)};"
         f"--r-sec:{rank_sector.get(ticker, 0)};"
         f"--r-tick:{rank_ticker.get(ticker, 0)};"
+        f"--r-mkt:{rank_mktcap.get(ticker, 0)};"
     )
     return (
-        f'<details class="row" style="{order_style}" data-weight="{weight}">'
+        f'<details class="row" style="{order_style}" '
+        f'data-eq="{eq_w}" data-ivp="{ivp_w}" data-hrp="{hrp_w}">'
         '<summary>'
         f'<span class="rank">{rank}</span>'
         f'<span class="ticker">{ticker_esc}</span>'
@@ -579,14 +640,14 @@ def _row_html(
         f'<span class="dot">·</span>'
         f'<span class="sector">{sector}</span>'
         f'</span>'
-        f'{cash_mini_html}'
+        f'{cash_minis}'
         '</summary>'
         '<div class="expanded">'
         '<div class="divider"></div>'
         f'{full_name_block}'
         f'<div class="factors">{factor_rows}</div>'
         f'<div class="explain">{explanation}</div>'
-        f'{cash_block}'
+        f'{weight_lines}'
         '</div>'
         '</details>'
     )
@@ -672,55 +733,97 @@ _HRP_METHODOLOGY = (
 
 
 _METHODOLOGY_BODY = (
+    '<h3>Model summary</h3>'
+    '<p>Each stock is scored on three factors — Momentum, Quality, Value — '
+    'standardised cross-sectionally and combined into a single composite '
+    'z-score. The top 25 composite-ranked names are then sized into a '
+    'portfolio using one of three weighting schemes (toggleable in the '
+    'Ranking card) and optionally scaled to a target portfolio volatility.</p>'
+
     '<h3>Momentum</h3>'
-    '<p>Risk-adjusted residual momentum. Each stock\'s daily log returns are '
-    'residualised in two stages: first the sector ETF is regressed on the '
-    'market (VTI) over the last 504 trading days to extract a market-orthogonal '
-    'sector residual, then each stock is regressed on [market, sector residual] '
-    'over the same window. The 12-1 sleeve sums residuals over t-252 to t-22; '
-    'the 6-1 sleeve sums over t-126 to t-22. Both are scaled by a 63-day '
-    'residual sigma (no skip, not annualised, with a 1e-6 floor). Each sleeve '
-    'is winsorised at 5/95 and z-scored across the universe, combined 50/50, '
-    'and z-scored once more.</p>'
+    '<p>Residual momentum, risk-adjusted. Daily log returns are first '
+    'residualised in two stages: each sector ETF is regressed on the market '
+    '(VTI) over the last 504 trading days to extract a market-orthogonal '
+    'sector residual, then each stock is regressed on [market, sector '
+    'residual] over the same window. The 12-1 sleeve sums residuals from '
+    't-252 to t-22; the 6-1 sleeve sums from t-126 to t-22. Both are divided '
+    'by a 63-day residual sigma (no skip, not annualised, floored at 1e-6). '
+    'Each sleeve is winsorised at 5/95 and z-scored across the universe, '
+    'combined 50/50, and z-scored once more.</p>'
+
     '<h3>Quality</h3>'
-    '<p>Sector-relative composite of (1) gross profitability = grossProfit / '
-    'totalAssets, (2) year-over-year change in gross profitability, and (3) '
-    'balance-sheet quality = −(totalDebt − cash) / totalAssets. Each component '
-    'is winsorised and z-scored within sector, combined 0.50 / 0.20 / 0.30, '
-    'and z-scored within sector again. Sectors with fewer than 5 finite '
-    'members fall back to a universe-wide z-score for those names.</p>'
+    '<p>Sector-relative composite of three components: '
+    '(1) gross profitability = grossProfit / totalAssets, '
+    '(2) year-over-year change in gross profitability, and '
+    '(3) balance-sheet quality = −(totalDebt − cash) / totalAssets. '
+    'Each component is winsorised and z-scored within its sector, combined '
+    '0.50 / 0.20 / 0.30, and z-scored within sector again. Sectors with '
+    'fewer than 5 finite members fall back to a universe-wide z-score so '
+    'small buckets do not produce mechanically-±1 outputs.</p>'
+
     '<h3>Value</h3>'
-    '<p>Sector-relative composite of EBIT/EV (40%) and FCF/EV (60%). '
-    'Enterprise value = market_cap + totalDebt − cash. Same winsorise-and-z-'
+    '<p>Sector-relative composite of EBIT/EV (40%) and FCF/EV (60%), where '
+    'enterprise value = market_cap + totalDebt − cash. Same winsorise-and-z-'
     'within-sector treatment as Quality, with the same small-sector fallback.</p>'
+
     '<h3>Composite weights</h3>'
-    '<p>Weighted sum of factor z-scores: 0.50 momentum + 0.30 quality + 0.20 '
-    'value. Missing factors contribute zero. If the share of universe with a '
-    'finite quality or value z-score falls below 40%, that factor is dropped '
+    '<p>Composite = 0.50 · Momentum + 0.30 · Quality + 0.20 · Value. '
+    'Missing factors contribute zero. If the share of the universe with a '
+    'finite Quality or Value z-score falls below 40%, that factor is dropped '
     'and the surviving weights renormalise.</p>'
+
     '<h3>Universe &amp; screener</h3>'
-    '<p>Stocks loaded from data/universe.json plus data/universe_extra.txt. '
-    'Share classes deduped to keep the voting class (GOOGL > GOOG, BRK.A > '
-    'BRK.B, PBR > PBR-A). Sector ETFs: the 11 SPDRs plus SOXX (Semiconductors) '
-    'and ITA (Aerospace &amp; Defense), with industry overrides routing semis '
-    'and A&amp;D names into their own buckets. expand.py uses FMP\'s screener '
-    'to add the next N US-listed names by market cap, skipping anything '
-    'already in the universe.</p>'
+    '<p>Stocks live in data/universe.json plus data/universe_extra.txt. '
+    'Share classes are deduped to keep the voting class (GOOGL > GOOG, '
+    'BRK.A > BRK.B, PBR > PBR-A). Sector taxonomy uses the 11 SPDR sectors '
+    'plus two carve-outs — Semiconductors (SOXX) and Aerospace &amp; Defense '
+    '(ITA) — with industry overrides routing semis and A&amp;D names into '
+    'their own buckets. expand.py uses FMP\'s screener to add the next N '
+    'US-listed names by market cap, skipping anything already in the '
+    'universe.</p>'
+
     '<h3>Portfolio weighting</h3>'
-    '<p>The top N composite-ranked names are weighted by the configured scheme '
-    '(equal, inverse volatility, or equal risk contribution) over a 252-day '
-    'daily-returns window. Cash per name = weight × deployment, rounded.</p>'
+    '<p>Three schemes are available and switchable inline:</p>'
+    '<p><b>Equal weight</b> — w_i = 1/N. Maximum diversification by name '
+    'count, no use of price/return information.</p>'
+    '<p><b>Inverse volatility</b> — w_i ∝ 1/σ_i, σ from a 252-day annualised '
+    'sample stdev (Maillard, Roncalli &amp; Teiletche, 2010). Tilts away '
+    'from high-vol names without considering correlations.</p>'
+    '<p><b>HRP — Hierarchical Risk Parity</b> (López de Prado, 2016). '
+    'Sample covariance over 504 days of <i>residual</i> daily returns is '
+    'converted to a correlation-distance metric d = √(0.5·(1 − ρ)). '
+    'Average-link agglomerative clustering produces a leaf order that '
+    'groups similar names together. Weights are then assigned by recursive '
+    'bisection: at each midpoint of the ordered list, allocate inversely '
+    'proportional to the inverse-variance-weighted variance of each side. '
+    'Long-only by construction, weights sum to 1, no name caps in v0.1.</p>'
+
+    '<h3>Volatility targeting</h3>'
+    '<p>Realised portfolio σ is computed for each scheme using the same '
+    'covariance window. If the realised σ exceeds the configured target, '
+    'the dollar deployment is scaled down by target/realised so the '
+    'expected portfolio σ matches the target — effectively holding cash. '
+    'If realised σ is already below the target, weights are left at full '
+    'deployment (no leverage). Per-name dollars = weight × deployment × '
+    'min(1, target/realised). Configure via VOL_TARGET in config.py; set '
+    'to None to disable.</p>'
+
     '<h3>Data source</h3>'
-    '<p>Financial Modeling Prep (stable + legacy v3): daily prices, annual '
-    'income / balance / cash-flow statements, and company profiles.</p>'
-    '<h3>Cache &amp; last updated</h3>'
+    '<p>Financial Modeling Prep (stable + legacy v3 endpoints): daily '
+    'prices, annual income / balance / cash-flow statements, and company '
+    'profiles.</p>'
+
+    '<h3>Cache</h3>'
     '<p>Pickled locally under cache/. Per-ticker freshness for fundamentals '
-    'and profiles (30-day refresh); global 5-day refresh for prices. Re-run '
-    'main.py --update to top up missing/stale data.</p>'
+    'and profiles (30-day refresh); global 5-day refresh for prices. Run '
+    'main.py --update to top up missing or stale data; --refresh forces '
+    'a full re-pull.</p>'
+
     '<h3>Caveats</h3>'
     '<p>Annual fundamentals can be up to 12 months stale. Shares outstanding '
-    'come from the latest annual income statement. Beta is a single-window '
-    'estimate over 504 days, not rolling. Not investment advice.</p>'
+    'come from the latest annual income statement. Betas are single-window '
+    'OLS estimates over 504 days, not rolling. The HRP covariance has no '
+    'shrinkage. Not investment advice.</p>'
 )
 
 
@@ -730,14 +833,22 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
     top_n = factors_used.get("top_n")
     cash = float(factors_used.get("cash_deployment") or 0)
     initial_sort = factors_used.get("sort", "composite")
+    raw_scheme = (factors_used.get("weighting_scheme") or "hrp").lower()
+    if raw_scheme in ("inverse_vol", "inv_vol", "ivp"):
+        initial_scheme = "ivp"
+    elif raw_scheme in ("equal", "equal_weight", "ew"):
+        initial_scheme = "equal"
+    else:
+        initial_scheme = "hrp"
 
     # Pre-compute the order index for each ticker under each sort key.
     if not ranked_df.empty:
         idx_composite = ranked_df.sort_values(
             "composite", ascending=False, kind="mergesort"
         ).index.tolist()
+        cash_sort_col = "hrp_weight" if "hrp_weight" in ranked_df.columns else "composite"
         idx_cash = ranked_df.sort_values(
-            "weight", ascending=False, kind="mergesort"
+            cash_sort_col, ascending=False, kind="mergesort"
         ).index.tolist()
         idx_sector = ranked_df.sort_values(
             ["sector", "composite"], ascending=[True, False], kind="mergesort"
@@ -745,12 +856,19 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         idx_ticker = ranked_df.sort_index(
             ascending=True, kind="mergesort"
         ).index.tolist()
+        if "market_cap" in ranked_df.columns:
+            idx_mktcap = ranked_df.sort_values(
+                "market_cap", ascending=False, kind="mergesort", na_position="last",
+            ).index.tolist()
+        else:
+            idx_mktcap = idx_composite
     else:
-        idx_composite = idx_cash = idx_sector = idx_ticker = []
+        idx_composite = idx_cash = idx_sector = idx_ticker = idx_mktcap = []
     rank_composite = {t: i for i, t in enumerate(idx_composite)}
     rank_cash = {t: i for i, t in enumerate(idx_cash)}
     rank_sector = {t: i for i, t in enumerate(idx_sector)}
     rank_ticker = {t: i for i, t in enumerate(idx_ticker)}
+    rank_mktcap = {t: i for i, t in enumerate(idx_mktcap)}
 
     # Compact page header (criteria summary + cash dropdown).
     header_bits = [f"<b>{_format_weights(weights)}</b>"]
@@ -766,88 +884,64 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
     )
     header_html = " &middot; ".join(header_bits) + " &middot; " + cash_picker
 
-    # --- Section 1: Portfolio Holdings (top N weighted, default open) ---
-    portfolio_df = ranked_df[ranked_df["weight"] > 0]
-    portfolio_rows_html = "".join(
-        _row_html(t, r, names, weights, cash,
-                  rank_composite, rank_cash, rank_sector, rank_ticker)
-        for t, r in portfolio_df.iterrows()
-    )
-    portfolio_subtitle = (
-        f"Top {len(portfolio_df)} weighted name"
-        + ("s" if len(portfolio_df) != 1 else "")
-    )
-    portfolio_section = (
-        '<details class="section" open>'
-        '<summary>'
-        '<div class="section-head">'
-        '<div class="section-title">Portfolio Holdings</div>'
-        f'<div class="section-subtitle">{portfolio_subtitle}</div>'
-        '</div>'
-        '</summary>'
-        '<div class="section-body">'
-        f'{_LIST_HEADER}'
-        f'<div class="list">{portfolio_rows_html}</div>'
-        '</div>'
-        '</details>'
-    )
+    scheme_scales = factors_used.get("scheme_scales") or {
+        "equal": 1.0, "ivp": 1.0, "hrp": 1.0,
+    }
+    scheme_vols = factors_used.get("scheme_vols") or {}
+    vol_target = factors_used.get("vol_target")
 
-    # --- Section 2: Weighted Top 25 (HRP, default closed) ---
-    hrp_df = ranked_df[ranked_df["hrp_weight"] > 0] if "hrp_weight" in ranked_df.columns else ranked_df.iloc[0:0]
-    hrp_rows_html = "".join(
-        _hrp_row_html(t, r, names, cash,
-                      rank_composite, rank_cash, rank_sector, rank_ticker)
-        for t, r in hrp_df.iterrows()
-    )
-    hrp_lookback = factors_used.get("hrp_lookback", 504)
-    hrp_subtitle = (
-        f"HRP-weighted, top {len(hrp_df)} by composite "
-        f"({hrp_lookback}d residual cov)"
-    )
-    hrp_section = (
-        '<details class="section">'
-        '<summary>'
-        '<div class="section-head">'
-        '<div class="section-title">Weighted Top 25</div>'
-        f'<div class="section-subtitle">{hrp_subtitle}</div>'
-        '</div>'
-        '</summary>'
-        '<div class="section-body">'
-        f'{_HRP_LIST_HEADER}'
-        f'<div class="list">{hrp_rows_html}</div>'
-        f'{_HRP_METHODOLOGY}'
-        '</div>'
-        '</details>'
-    )
-
-    # --- Section 3: Full Ranking (default closed) ---
-    full_rows_html = "".join(
-        _row_html(t, r, names, weights, cash,
-                  rank_composite, rank_cash, rank_sector, rank_ticker)
+    # --- Section 1: Ranking (default open) — single scrolling list with the
+    # weighting toggle. Top N stocks have non-zero weights and show cash;
+    # rest just show composite.
+    rows_html = "".join(
+        _row_html(t, r, names, weights, cash, scheme_scales,
+                  rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap)
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)
-    display_limit = factors_used.get("display_limit")
-    if display_limit and universe_total > len(ranked_df):
+    if factors_used.get("display_limit") and universe_total > len(ranked_df):
         full_subtitle = f"Top {len(ranked_df)} of {universe_total} stocks"
     else:
-        full_subtitle = f"{len(ranked_df)} stock" + ("s" if len(ranked_df) != 1 else "")
+        full_subtitle = f"{len(ranked_df)} stocks"
+    weighted_count = (ranked_df["hrp_weight"] > 0).sum() if "hrp_weight" in ranked_df.columns else 0
+    if weighted_count:
+        full_subtitle += f" · top {int(weighted_count)} weighted"
+    if vol_target:
+        full_subtitle += f" · {vol_target*100:.0f}% vol target"
+
+    weighting_toggle = (
+        '<div class="weighting-toggle">'
+        '<span class="toolbar-label">Weighting</span>'
+        '<label for="wt-hrp" class="sort-btn">HRP</label>'
+        '<label for="wt-ivp" class="sort-btn">Inv Vol</label>'
+        '<label for="wt-equal" class="sort-btn">Equal</label>'
+        '</div>'
+    )
+
     full_section = (
-        '<details class="section">'
+        '<details class="section" open>'
         '<summary>'
         '<div class="section-head">'
-        '<div class="section-title">Full Ranking</div>'
+        '<div class="section-title">Ranking</div>'
         f'<div class="section-subtitle">{full_subtitle}</div>'
         '</div>'
         '</summary>'
         '<div class="section-body">'
+        f'{weighting_toggle}'
         f'{_LIST_HEADER}'
-        f'<div class="list">{full_rows_html}</div>'
+        f'<div class="list">{rows_html}</div>'
         '</div>'
         '</details>'
     )
 
     # --- Section 3: Methodology & details (default closed) ---
+    js_block = (
+        _JS
+        .replace("__SCALE_EQ__", str(scheme_scales.get("equal", 1.0)))
+        .replace("__SCALE_IVP__", str(scheme_scales.get("ivp", 1.0)))
+        .replace("__SCALE_HRP__", str(scheme_scales.get("hrp", 1.0)))
+    )
+
     methodology_section = (
         '<details class="section">'
         '<summary>'
@@ -867,12 +961,16 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         '<title>M/Q/V Ranking</title>'
         f'<style>{_CSS}</style>'
         '</head><body>'
-        # Hidden sort radios at the top of body so the CSS general-sibling
-        # selector reaches both the sticky toolbar and the rows in either list.
+        # Hidden sort + weighting radios at the top of body so the CSS general-
+        # sibling selector reaches both the sticky toolbar and the rows below.
         f'<input type="radio" name="sort" id="sort-composite" class="sort-radio"{ " checked" if initial_sort == "composite" else "" }>'
         f'<input type="radio" name="sort" id="sort-cash" class="sort-radio"{ " checked" if initial_sort == "cash" else "" }>'
         f'<input type="radio" name="sort" id="sort-sector" class="sort-radio"{ " checked" if initial_sort == "sector" else "" }>'
         f'<input type="radio" name="sort" id="sort-ticker" class="sort-radio"{ " checked" if initial_sort == "ticker" else "" }>'
+        f'<input type="radio" name="sort" id="sort-mktcap" class="sort-radio"{ " checked" if initial_sort == "mktcap" else "" }>'
+        f'<input type="radio" name="weighting" id="wt-hrp" class="sort-radio"{ " checked" if initial_scheme == "hrp" else "" }>'
+        f'<input type="radio" name="weighting" id="wt-ivp" class="sort-radio"{ " checked" if initial_scheme == "ivp" else "" }>'
+        f'<input type="radio" name="weighting" id="wt-equal" class="sort-radio"{ " checked" if initial_scheme == "equal" else "" }>'
         f'<div class="header">{header_html}</div>'
         '<div class="sticky-top">'
         '<div class="toolbar">'
@@ -881,13 +979,12 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         '<label for="sort-cash" class="sort-btn">Cash</label>'
         '<label for="sort-sector" class="sort-btn">Sector</label>'
         '<label for="sort-ticker" class="sort-btn">Ticker</label>'
+        '<label for="sort-mktcap" class="sort-btn">Market Cap</label>'
         '</div>'
         '</div>'
-        f'{portfolio_section}'
-        f'{hrp_section}'
         f'{full_section}'
         f'{methodology_section}'
-        f'{_JS}'
+        f'{js_block}'
         '</body></html>'
     )
 

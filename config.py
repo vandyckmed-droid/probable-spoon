@@ -52,9 +52,10 @@ MIN_SECTOR_SIZE            = 5    # below this, fall back to universe-wide z
 
 # Portfolio weighting (applied to the top N composite-ranked names)
 TOP_N                = 25
-WEIGHTING_SCHEME     = "inverse_vol"   # equal | inverse_vol | erc
+WEIGHTING_SCHEME     = "hrp"           # default for the Weighted Top 25 toggle
 WEIGHT_LOOKBACK_DAYS = 252
 CASH_DEPLOYMENT      = 30000           # default $; overridden by `main.py --cash`
+VOL_TARGET           = 0.12            # annualised target portfolio vol; None disables
 
 # Universe / market
 MARKET_TICKER = "VTI"
