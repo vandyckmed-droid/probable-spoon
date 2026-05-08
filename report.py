@@ -909,8 +909,7 @@ def render(
     # rest just show composite.
     rows_html = "".join(
         _row_html(t, r, names, weights, cash, scheme_scales,
-                  rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap,
-                  logos=logos)
+                  rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap)
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)
