@@ -439,6 +439,12 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
     header_bits = [f"<b>{_format_weights(weights)}</b>"]
     if scheme and top_n:
         header_bits.append(f"Top {top_n} weighted by {scheme.replace('_', ' ')}")
+    display_limit = factors_used.get("display_limit")
+    universe_total = factors_used.get("universe_total")
+    if display_limit and universe_total and universe_total > display_limit:
+        header_bits.append(
+            f"Showing top {display_limit} of {universe_total} (--limit to change)"
+        )
     cash_options = ""
     for v in (25000, 30000, 35000, 40000):
         sel = " selected" if int(round(cash)) == v else ""

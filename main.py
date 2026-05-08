@@ -80,6 +80,11 @@ def parse_args(argv=None):
         choices=["composite", "cash", "sector", "ticker"],
         help="Initial sort order in the report (default composite).",
     )
+    p.add_argument(
+        "--limit", type=int, default=100, metavar="N",
+        help="Cap the report at the top N composite-ranked stocks (default 100). "
+             "Set to 0 to render the full universe.",
+    )
     return p.parse_args(argv)
 
 
@@ -132,6 +137,13 @@ def main():
     factors_used["top_n"] = top_n
     factors_used["cash_deployment"] = float(cash)
     factors_used["sort"] = args.sort
+    factors_used["universe_total"] = len(ranked)
+
+    if args.limit and args.limit > 0 and len(ranked) > args.limit:
+        ranked = ranked.head(args.limit).copy()
+        factors_used["display_limit"] = args.limit
+    else:
+        factors_used["display_limit"] = None
 
     if args.sort == "cash":
         ranked = ranked.sort_values("weight", ascending=False, kind="mergesort")
