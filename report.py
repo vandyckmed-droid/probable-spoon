@@ -324,6 +324,12 @@ details.row > summary::marker { display: none; }
 }
 .meta .dot { flex: 0 0 auto; opacity: 0.5; }
 .meta .sector { flex: 0 0 auto; white-space: nowrap; }
+.meta .sector-sym {
+  display: inline-block;
+  margin-right: 2px;
+  font-size: 12px;
+  vertical-align: baseline;
+}
 .full-name {
   font-size: 13px; color: #6b6b70;
   margin-top: 10px; margin-bottom: -2px;
@@ -592,6 +598,27 @@ def _factor_row(label: str, weight, z) -> str:
     )
 
 
+_SECTOR_SYMBOLS = {
+    "Technology": "💻",
+    "Healthcare": "🏥",
+    "Financial Services": "🏦",
+    "Consumer Cyclical": "🛒",
+    "Consumer Defensive": "🥫",
+    "Industrials": "🏭",
+    "Energy": "⛽",
+    "Utilities": "⚡",
+    "Real Estate": "🏢",
+    "Basic Materials": "⛏",
+    "Communication Services": "📡",
+    "Semiconductors": "🔬",
+    "Aerospace & Defense": "✈️",
+}
+
+
+def _sector_symbol(sector: str) -> str:
+    return _SECTOR_SYMBOLS.get((sector or "").strip(), "•")
+
+
 def _show_classes(rank: int) -> str:
     bits = []
     if rank < 25:
@@ -617,7 +644,9 @@ def _row_html(
     """
     rank_val = row.get("rank")
     rank = str(int(rank_val)) if pd.notna(rank_val) else "—"
-    sector = _escape(row.get("sector") or "—")
+    sector_raw = row.get("sector") or "—"
+    sector_sym = _sector_symbol(sector_raw)
+    sector = _escape(sector_raw)
     comp_val = row.get("composite")
     composite = float(comp_val) if pd.notna(comp_val) else None
     pill_cls = _pill_class(composite)
@@ -701,7 +730,7 @@ def _row_html(
         f'<span class="meta">'
         f'<span class="name">{name}</span>'
         f'<span class="dot">·</span>'
-        f'<span class="sector">{sector}</span>'
+        f'<span class="sector"><span class="sector-sym">{sector_sym}</span> {sector}</span>'
         f'</span>'
         f'{cash_minis}'
         '</summary>'
