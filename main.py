@@ -201,8 +201,7 @@ def main():
     # composite is already the default sort from build_ranked.
 
     names = store.company_names(display_ranked.index.tolist())
-    logos = store.company_logos(display_ranked.index.tolist())
-    html = report.render(display_ranked, names, factors_used, logos=logos)
+    html = report.render(display_ranked, names, factors_used)
     report_path = (out_dir / "report.html").resolve()
     report.write_report(html, str(report_path))
     # CSV always carries the full ranked frame, untruncated and unsorted-by-flag.

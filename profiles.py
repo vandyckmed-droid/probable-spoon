@@ -14,7 +14,6 @@ _FIELD_MAP = {
     "country": "country",
     "exchange": "exchangeShortName",
     "currency": "currency",
-    "image": "image",
 }
 
 
