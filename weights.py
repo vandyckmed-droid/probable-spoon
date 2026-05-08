@@ -269,3 +269,88 @@ def vol_target_scale(realized: float, target: float | None) -> float:
     if not np.isfinite(realized) or not np.isfinite(target):
         return 1.0
     return float(min(1.0, target / realized))
+
+
+def backtest_portfolio(
+    returns: pd.DataFrame, weights_series: pd.Series, lookback_days: int = 126,
+) -> dict | None:
+    """v0.1 lookback attribution: hold the current weights statically over the
+    last `lookback_days` of price history. Returns total return, annualised
+    Sharpe, max drawdown, and the daily cumulative simple-return path.
+
+    Note: this is NOT a true rolling-rebalance backtest — the names and
+    weights are picked from today's data and applied backwards. Useful as a
+    sanity check on the resulting portfolio's recent risk/return profile,
+    not as a forecast of future performance.
+    """
+    if weights_series is None or weights_series.empty:
+        return None
+    nonzero = weights_series[weights_series > 0]
+    if nonzero.empty:
+        return None
+    available = [t for t in nonzero.index if t in returns.columns]
+    if not available:
+        return None
+    window = returns[available].tail(lookback_days).dropna()
+    if window.shape[0] < 30:
+        return None
+    w = nonzero.loc[available].to_numpy()
+    w = w / w.sum() if w.sum() > 0 else w  # renormalise after dropping missing
+    daily = window.to_numpy() @ w
+    cum_log = np.cumsum(daily)
+    wealth = np.exp(cum_log)
+    cum_simple = wealth - 1.0
+    total_return = float(cum_simple[-1])
+    daily_std = float(np.std(daily, ddof=0))
+    sharpe = (
+        float(np.mean(daily) / daily_std * np.sqrt(_TRADING_DAYS))
+        if daily_std > 0 else 0.0
+    )
+    running_peak = np.maximum.accumulate(wealth)
+    max_dd = float((wealth / running_peak - 1.0).min())
+    idx = window.index
+    start_date = str(idx[0].date()) if hasattr(idx[0], "date") else str(idx[0])
+    end_date = str(idx[-1].date()) if hasattr(idx[-1], "date") else str(idx[-1])
+    return {
+        "days": int(window.shape[0]),
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_return": total_return,
+        "sharpe": sharpe,
+        "max_drawdown": max_dd,
+        "cumulative": [float(x) for x in cum_simple],
+    }
+
+
+def backtest_market(
+    returns: pd.DataFrame, ticker: str, lookback_days: int = 126,
+) -> dict | None:
+    """Same shape as backtest_portfolio but for a single benchmark ticker."""
+    if ticker not in returns.columns:
+        return None
+    series = returns[ticker].tail(lookback_days).dropna()
+    if series.shape[0] < 30:
+        return None
+    daily = series.to_numpy()
+    cum_log = np.cumsum(daily)
+    wealth = np.exp(cum_log)
+    cum_simple = wealth - 1.0
+    daily_std = float(np.std(daily, ddof=0))
+    sharpe = (
+        float(np.mean(daily) / daily_std * np.sqrt(_TRADING_DAYS))
+        if daily_std > 0 else 0.0
+    )
+    running_peak = np.maximum.accumulate(wealth)
+    max_dd = float((wealth / running_peak - 1.0).min())
+    idx = series.index
+    start_date = str(idx[0].date()) if hasattr(idx[0], "date") else str(idx[0])
+    end_date = str(idx[-1].date()) if hasattr(idx[-1], "date") else str(idx[-1])
+    return {
+        "days": int(series.shape[0]),
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_return": float(cum_simple[-1]),
+        "sharpe": sharpe,
+        "max_drawdown": max_dd,
+        "cumulative": [float(x) for x in cum_simple],
+    }

@@ -14,7 +14,7 @@ import store
 import weights as weights_mod
 from config import (
     MARKET_TICKER, TOP_N, WEIGHTING_SCHEME, WEIGHT_LOOKBACK_DAYS,
-    CASH_DEPLOYMENT, BETA_LOOKBACK_DAYS, VOL_TARGET,
+    CASH_DEPLOYMENT, BETA_LOOKBACK_DAYS, VOL_TARGET, BACKTEST_DAYS,
 )
 from universe import load_sector_etf_map, ticker_to_sector
 
@@ -163,6 +163,16 @@ def main():
     }
     factors_used["scheme_scales"] = {
         "equal": scale_eq, "ivp": scale_ivp, "hrp": scale_hrp,
+    }
+
+    # Lookback attribution (v0.1 backtest): apply current weights to the last
+    # BACKTEST_DAYS of returns and report total return, Sharpe, max drawdown.
+    factors_used["backtest"] = {
+        "lookback_days": BACKTEST_DAYS,
+        "equal": weights_mod.backtest_portfolio(returns, equal_w, BACKTEST_DAYS),
+        "ivp":   weights_mod.backtest_portfolio(returns, ivp_w, BACKTEST_DAYS),
+        "hrp":   weights_mod.backtest_portfolio(returns, hrp_w, BACKTEST_DAYS),
+        "market": weights_mod.backtest_market(returns, MARKET_TICKER, BACKTEST_DAYS),
     }
     factors_used["sort"] = args.sort
     factors_used["universe_total"] = len(ranked)

@@ -211,6 +211,34 @@ details.sub-drawer p {
   color: #4b4b50; margin: 8px 0;
 }
 
+.bt-table {
+  display: flex; flex-direction: column;
+  font-size: 13px;
+}
+.bt-row {
+  display: grid;
+  grid-template-columns: 1.2fr repeat(3, 1fr);
+  column-gap: 8px;
+  padding: 6px 4px;
+  align-items: baseline;
+  border-bottom: 1px solid #ececef;
+}
+.bt-row:last-child { border-bottom: none; }
+.bt-row.bt-head { color: #8e8e93; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.bt-label { color: #1c1c1e; font-weight: 500; }
+.bt-cell {
+  font-variant-numeric: tabular-nums; text-align: right;
+  color: #1c1c1e;
+}
+.bt-cell.ret { font-weight: 600; }
+.bt-cell.dd { color: #b8434b; }
+.bt-caveat {
+  font-size: 12px; line-height: 1.5;
+  color: #8e8e93; margin: 12px 0 0;
+}
+
 .methodology-body h3 {
   font-size: 13px; font-weight: 600;
   margin: 14px 0 4px; color: #1c1c1e;
@@ -347,6 +375,11 @@ details.row > summary::marker { display: none; }
   .section-subtitle { color: #8e8e93; }
   .methodology-body h3 { color: #ececec; }
   .methodology-body p { color: #aeaeb2; }
+  .bt-row { border-bottom-color: #2c2c2e; }
+  .bt-label { color: #ececec; }
+  .bt-cell { color: #ececec; }
+  .bt-cell.dd { color: #ff6e75; }
+  .bt-caveat { color: #8e8e93; }
   details.row { background: #1c1c1e; box-shadow: none; }
   .hrp-row { background: #1c1c1e; box-shadow: none; }
   .hrp-row .ticker { color: #ececec; }
@@ -827,6 +860,97 @@ _METHODOLOGY_BODY = (
 )
 
 
+def _fmt_pct(x, decimals: int = 2) -> str:
+    if x is None:
+        return "—"
+    return f"{x*100:+.{decimals}f}%"
+
+
+def _fmt_signed(x, decimals: int = 2) -> str:
+    if x is None:
+        return "—"
+    return f"{x:+.{decimals}f}"
+
+
+def _backtest_row(label: str, bt: dict | None) -> str:
+    if not bt:
+        return (
+            f'<div class="bt-row">'
+            f'<span class="bt-label">{label}</span>'
+            f'<span class="bt-cell">—</span>'
+            f'<span class="bt-cell">—</span>'
+            f'<span class="bt-cell">—</span>'
+            f'</div>'
+        )
+    return (
+        f'<div class="bt-row">'
+        f'<span class="bt-label">{label}</span>'
+        f'<span class="bt-cell ret">{_fmt_pct(bt.get("total_return"))}</span>'
+        f'<span class="bt-cell">{_fmt_signed(bt.get("sharpe"))}</span>'
+        f'<span class="bt-cell dd">{_fmt_pct(bt.get("max_drawdown"))}</span>'
+        f'</div>'
+    )
+
+
+def _backtest_section_html(bt: dict) -> str:
+    lookback = bt.get("lookback_days") or 0
+    eq = bt.get("equal")
+    ivp = bt.get("ivp")
+    hrp = bt.get("hrp")
+    market = bt.get("market")
+    if not any([eq, ivp, hrp, market]):
+        return ""
+    # Period from any available leg
+    start = end = ""
+    for leg in (hrp, ivp, eq, market):
+        if leg and leg.get("start_date"):
+            start = leg["start_date"]
+            end = leg["end_date"]
+            break
+    period_text = f"{start} → {end}" if start and end else f"{lookback} trading days"
+    subtitle = f"v0.1 lookback · {period_text}"
+    rows = (
+        '<div class="bt-row bt-head">'
+        '<span class="bt-label"></span>'
+        '<span class="bt-cell">Total return</span>'
+        '<span class="bt-cell">Sharpe (ann.)</span>'
+        '<span class="bt-cell">Max drawdown</span>'
+        '</div>'
+        + _backtest_row("HRP", hrp)
+        + _backtest_row("Inv Vol", ivp)
+        + _backtest_row("Equal", eq)
+        + _backtest_row(f"{MARKET_TICKER_LABEL} (benchmark)", market)
+    )
+    caveat = (
+        '<p class="bt-caveat">Holds today\'s top-25 weights statically over '
+        'the past period — a current-portfolio attribution, not a true '
+        'rolling-rebalance backtest. Selection uses present data, so this '
+        'has look-ahead bias on stock picking. Useful as a recent risk/'
+        'return sanity check only.</p>'
+    )
+    return (
+        '<details class="section">'
+        '<summary>'
+        '<div class="section-head">'
+        '<div class="section-title">Backtest</div>'
+        f'<div class="section-subtitle">{subtitle}</div>'
+        '</div>'
+        '</summary>'
+        '<div class="section-body">'
+        f'<div class="bt-table">{rows}</div>'
+        f'{caveat}'
+        '</div>'
+        '</details>'
+    )
+
+
+# Imported at module scope to avoid an extra import inside the helper.
+try:
+    from config import MARKET_TICKER as MARKET_TICKER_LABEL
+except ImportError:
+    MARKET_TICKER_LABEL = "Market"
+
+
 def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
     weights = factors_used.get("weights", {})
     scheme = factors_used.get("weighting_scheme", "")
@@ -942,6 +1066,8 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         .replace("__SCALE_HRP__", str(scheme_scales.get("hrp", 1.0)))
     )
 
+    backtest_section = _backtest_section_html(factors_used.get("backtest") or {})
+
     methodology_section = (
         '<details class="section">'
         '<summary>'
@@ -983,6 +1109,7 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         '</div>'
         '</div>'
         f'{full_section}'
+        f'{backtest_section}'
         f'{methodology_section}'
         f'{js_block}'
         '</body></html>'

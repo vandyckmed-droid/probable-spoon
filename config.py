@@ -56,6 +56,7 @@ WEIGHTING_SCHEME     = "hrp"           # default for the Weighted Top 25 toggle
 WEIGHT_LOOKBACK_DAYS = 252
 CASH_DEPLOYMENT      = 30000           # default $; overridden by `main.py --cash`
 VOL_TARGET           = 0.12            # annualised target portfolio vol; None disables
+BACKTEST_DAYS        = 126             # ~6 months of look-back attribution
 
 # Universe / market
 MARKET_TICKER = "VTI"
