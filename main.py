@@ -140,27 +140,31 @@ def main():
     factors_used["universe_total"] = len(ranked)
 
     if args.limit and args.limit > 0 and len(ranked) > args.limit:
-        ranked = ranked.head(args.limit).copy()
+        display_ranked = ranked.head(args.limit).copy()
         factors_used["display_limit"] = args.limit
     else:
+        display_ranked = ranked
         factors_used["display_limit"] = None
 
     if args.sort == "cash":
-        ranked = ranked.sort_values("weight", ascending=False, kind="mergesort")
+        display_ranked = display_ranked.sort_values(
+            "weight", ascending=False, kind="mergesort"
+        )
     elif args.sort == "sector":
-        ranked = ranked.sort_values(
+        display_ranked = display_ranked.sort_values(
             ["sector", "composite"], ascending=[True, False], kind="mergesort"
         )
     elif args.sort == "ticker":
-        ranked = ranked.sort_index(ascending=True, kind="mergesort")
+        display_ranked = display_ranked.sort_index(ascending=True, kind="mergesort")
     # composite is already the default sort from build_ranked.
 
-    names = store.company_names(ranked.index.tolist())
-    html = report.render(ranked, names, factors_used)
+    names = store.company_names(display_ranked.index.tolist())
+    html = report.render(display_ranked, names, factors_used)
     report_path = (out_dir / "report.html").resolve()
     report.write_report(html, str(report_path))
+    # CSV always carries the full ranked frame, untruncated and unsorted-by-flag.
     report.write_csv(ranked, str((out_dir / "ranked_stocks.csv").resolve()))
-    print(f"Ranked {len(ranked)} tickers → {report_path}")
+    print(f"Ranked {len(display_ranked)} of {len(ranked)} tickers → {report_path}")
 
     if not args.no_open:
         _open_file(report_path)
