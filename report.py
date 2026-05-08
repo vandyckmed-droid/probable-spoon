@@ -72,6 +72,22 @@ body {
 #sort-ticker:checked    ~ .section .list .row { order: var(--r-tick, 0); }
 #sort-mktcap:checked    ~ .section .list .row { order: var(--r-mkt, 0); }
 
+/* Show-top-N toggle: rows carry .in-25 / .in-50 / .in-100 classes based on
+   their composite rank. CSS hides anything outside the active threshold. */
+#show-25:checked ~ .section .list .row { display: none; }
+#show-50:checked ~ .section .list .row { display: none; }
+#show-25:checked ~ .section .list .row.in-25 { display: block; }
+#show-50:checked ~ .section .list .row.in-50 { display: block; }
+.sub-25, .sub-50, .sub-100 { display: none; }
+#show-25:checked  ~ .section .sub-25 { display: inline; }
+#show-50:checked  ~ .section .sub-50 { display: inline; }
+#show-100:checked ~ .section .sub-100 { display: inline; }
+#show-25:checked  ~ .section label[for="show-25"],
+#show-50:checked  ~ .section label[for="show-50"],
+#show-100:checked ~ .section label[for="show-100"] {
+  background: #1c1c1e; color: #fff; border-color: #1c1c1e;
+}
+
 /* Weighting scheme toggle: hide all three cash-mini variants by default,
    then reveal whichever one the active radio matches. */
 .cm-eq, .cm-ivp, .cm-hrp,
@@ -574,6 +590,17 @@ def _factor_row(label: str, weight, z) -> str:
     )
 
 
+def _show_classes(rank: int) -> str:
+    bits = []
+    if rank < 25:
+        bits.append("in-25")
+    if rank < 50:
+        bits.append("in-50")
+    if rank < 100:
+        bits.append("in-100")
+    return " ".join(bits)
+
+
 def _row_html(
     ticker, row, names: dict, weights: dict, cash: float,
     scheme_scales: dict,
@@ -661,8 +688,9 @@ def _row_html(
         f"--r-tick:{rank_ticker.get(ticker, 0)};"
         f"--r-mkt:{rank_mktcap.get(ticker, 0)};"
     )
+    show_cls = _show_classes(rank_composite.get(ticker, 9999))
     return (
-        f'<details class="row" style="{order_style}" '
+        f'<details class="row {show_cls}" style="{order_style}" '
         f'data-eq="{eq_w}" data-ivp="{ivp_w}" data-hrp="{hrp_w}">'
         '<summary>'
         f'<span class="rank">{rank}</span>'
@@ -964,6 +992,14 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         initial_scheme = "equal"
     else:
         initial_scheme = "hrp"
+    # Default Show pick: 100 if at least 100 rendered, else next-smaller.
+    n_rendered = len(ranked_df)
+    if n_rendered >= 100:
+        initial_show = "100"
+    elif n_rendered >= 50:
+        initial_show = "50"
+    else:
+        initial_show = "25"
 
     # Pre-compute the order index for each ticker under each sort key.
     if not ranked_df.empty:
@@ -1023,15 +1059,21 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)
-    if factors_used.get("display_limit") and universe_total > len(ranked_df):
-        full_subtitle = f"Top {len(ranked_df)} of {universe_total} stocks"
-    else:
-        full_subtitle = f"{len(ranked_df)} stocks"
     weighted_count = (ranked_df["hrp_weight"] > 0).sum() if "hrp_weight" in ranked_df.columns else 0
-    if weighted_count:
-        full_subtitle += f" · top {int(weighted_count)} weighted"
-    if vol_target:
-        full_subtitle += f" · {vol_target*100:.0f}% vol target"
+    weighted_suffix = f" · top {int(weighted_count)} weighted" if weighted_count else ""
+    vol_suffix = f" · {vol_target*100:.0f}% vol target" if vol_target else ""
+
+    def _make_sub(visible_n: int) -> str:
+        actual = min(visible_n, len(ranked_df))
+        if universe_total > actual:
+            return f"Top {actual} of {universe_total} stocks{weighted_suffix}{vol_suffix}"
+        return f"{actual} stocks{weighted_suffix}{vol_suffix}"
+
+    full_subtitle = (
+        f'<span class="sub-25">{_make_sub(25)}</span>'
+        f'<span class="sub-50">{_make_sub(50)}</span>'
+        f'<span class="sub-100">{_make_sub(100)}</span>'
+    )
 
     weighting_toggle = (
         '<div class="weighting-toggle">'
@@ -1039,6 +1081,15 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         '<label for="wt-hrp" class="sort-btn">HRP</label>'
         '<label for="wt-ivp" class="sort-btn">Inv Vol</label>'
         '<label for="wt-equal" class="sort-btn">Equal</label>'
+        '</div>'
+    )
+
+    show_toggle = (
+        '<div class="weighting-toggle">'
+        '<span class="toolbar-label">Show</span>'
+        '<label for="show-25" class="sort-btn">Top 25</label>'
+        '<label for="show-50" class="sort-btn">Top 50</label>'
+        '<label for="show-100" class="sort-btn">Top 100</label>'
         '</div>'
     )
 
@@ -1052,6 +1103,7 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         '</summary>'
         '<div class="section-body">'
         f'{weighting_toggle}'
+        f'{show_toggle}'
         f'{_LIST_HEADER}'
         f'<div class="list">{rows_html}</div>'
         '</div>'
@@ -1097,6 +1149,9 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         f'<input type="radio" name="weighting" id="wt-hrp" class="sort-radio"{ " checked" if initial_scheme == "hrp" else "" }>'
         f'<input type="radio" name="weighting" id="wt-ivp" class="sort-radio"{ " checked" if initial_scheme == "ivp" else "" }>'
         f'<input type="radio" name="weighting" id="wt-equal" class="sort-radio"{ " checked" if initial_scheme == "equal" else "" }>'
+        f'<input type="radio" name="show" id="show-25" class="sort-radio"{ " checked" if initial_show == "25" else "" }>'
+        f'<input type="radio" name="show" id="show-50" class="sort-radio"{ " checked" if initial_show == "50" else "" }>'
+        f'<input type="radio" name="show" id="show-100" class="sort-radio"{ " checked" if initial_show == "100" else "" }>'
         f'<div class="header">{header_html}</div>'
         '<div class="sticky-top">'
         '<div class="toolbar">'
