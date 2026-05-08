@@ -66,10 +66,14 @@ body {
   background: #1c1c1e; color: #fff; border-color: #1c1c1e;
 }
 
-#sort-composite:checked ~ .list .row { order: var(--r-c, 0); }
-#sort-cash:checked      ~ .list .row { order: var(--r-cash, 0); }
-#sort-sector:checked    ~ .list .row { order: var(--r-sec, 0); }
-#sort-ticker:checked    ~ .list .row { order: var(--r-tick, 0); }
+#sort-composite:checked ~ .section .list .row { order: var(--r-c, 0); }
+#sort-cash:checked      ~ .section .list .row { order: var(--r-cash, 0); }
+#sort-sector:checked    ~ .section .list .row { order: var(--r-sec, 0); }
+#sort-ticker:checked    ~ .section .list .row { order: var(--r-tick, 0); }
+#sort-composite:checked ~ .section .list .hrp-row { order: var(--r-c, 0); }
+#sort-cash:checked      ~ .section .list .hrp-row { order: var(--r-cash, 0); }
+#sort-sector:checked    ~ .section .list .hrp-row { order: var(--r-sec, 0); }
+#sort-ticker:checked    ~ .section .list .hrp-row { order: var(--r-tick, 0); }
 
 .list { display: flex; flex-direction: column; gap: 6px; }
 
@@ -113,6 +117,80 @@ details.section[open] > summary::after { transform: rotate(-135deg); }
 }
 .section-body .list-header .col-rank { text-align: center; }
 .section-body .list-header .col-comp { text-align: right; }
+
+.hrp-row {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: grid;
+  grid-template-columns: 30px 1fr 80px;
+  grid-template-rows: auto auto;
+  column-gap: 10px; row-gap: 2px;
+  align-items: center;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.hrp-row .rank {
+  grid-row: 1 / span 2; grid-column: 1;
+  font-size: 13px; color: #8e8e93;
+  font-variant-numeric: tabular-nums; text-align: center;
+}
+.hrp-row .ticker {
+  grid-row: 1; grid-column: 2;
+  font-weight: 600; font-size: 17px; letter-spacing: -0.01em;
+}
+.hrp-pill {
+  grid-row: 1; grid-column: 3;
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600; font-size: 14px;
+  padding: 3px 10px; border-radius: 999px;
+  background: #ececef; color: #1c1c1e;
+  white-space: nowrap;
+}
+.hrp-row .meta {
+  grid-row: 2; grid-column: 2;
+  font-size: 13px; color: #6b6b70;
+  display: flex; align-items: baseline; gap: 6px;
+  min-width: 0;
+}
+.hrp-row .meta .name {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #1c1c1e;
+}
+.hrp-row .meta .dot { flex: 0 0 auto; opacity: 0.5; }
+.hrp-row .meta .sector { flex: 0 0 auto; white-space: nowrap; }
+.hrp-row .cash-mini {
+  grid-row: 2; grid-column: 3;
+  justify-self: end; text-align: right;
+  font-size: 12px; color: #6b6b70;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+details.sub-drawer {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: #f5f5f7;
+  border-radius: 8px;
+}
+details.sub-drawer > summary {
+  cursor: pointer; list-style: none;
+  font-size: 13px; font-weight: 600;
+  color: #4b4b50;
+  user-select: none; -webkit-user-select: none;
+}
+details.sub-drawer > summary::-webkit-details-marker { display: none; }
+details.sub-drawer > summary::before {
+  content: '\\203A'; color: #b0b0b5;
+  margin-right: 6px;
+  display: inline-block;
+  transition: transform 0.15s;
+}
+details.sub-drawer[open] > summary::before { transform: rotate(90deg); }
+details.sub-drawer p {
+  font-size: 13px; line-height: 1.5;
+  color: #4b4b50; margin: 8px 0;
+}
 
 .methodology-body h3 {
   font-size: 13px; font-weight: 600;
@@ -251,6 +329,15 @@ details.row > summary::marker { display: none; }
   .methodology-body h3 { color: #ececec; }
   .methodology-body p { color: #aeaeb2; }
   details.row { background: #1c1c1e; box-shadow: none; }
+  .hrp-row { background: #1c1c1e; box-shadow: none; }
+  .hrp-row .ticker { color: #ececec; }
+  .hrp-row .meta { color: #8e8e93; }
+  .hrp-row .meta .name { color: #ececec; }
+  .hrp-row .rank, .hrp-row .cash-mini { color: #8e8e93; }
+  .hrp-pill { background: #2c2c2e; color: #ececec; }
+  details.sub-drawer { background: #2c2c2e; }
+  details.sub-drawer > summary { color: #aeaeb2; }
+  details.sub-drawer p { color: #aeaeb2; }
   .cash-mini { color: #8e8e93; }
   .ticker { color: #ececec; }
   .meta { color: #8e8e93; }
@@ -505,12 +592,82 @@ def _row_html(
     )
 
 
+def _hrp_row_html(
+    ticker, row, names: dict, cash: float,
+    rank_composite: dict, rank_cash: dict, rank_sector: dict, rank_ticker: dict,
+) -> str:
+    """Compact non-collapsible row for the Weighted Top 25 card."""
+    rank_val = row.get("rank")
+    rank = str(int(rank_val)) if pd.notna(rank_val) else "—"
+    sector = _escape(row.get("sector") or "—")
+    ticker_esc = _escape(ticker)
+    full_name = names.get(ticker, ticker) or ticker
+    short_name = _short_name(full_name)
+    name = _escape(short_name)
+
+    hrp_val = row.get("hrp_weight")
+    hrp_w = float(hrp_val) if pd.notna(hrp_val) else 0.0
+    weight_pct = f"{hrp_w*100:.2f}%" if hrp_w > 0 else "—"
+    cash_amt = int(round(hrp_w * cash)) if hrp_w > 0 and cash > 0 else 0
+    cash_text = f"${cash_amt:,}" if cash_amt > 0 else ""
+
+    order_style = (
+        f"--r-c:{rank_composite.get(ticker, 0)};"
+        f"--r-cash:{rank_cash.get(ticker, 0)};"
+        f"--r-sec:{rank_sector.get(ticker, 0)};"
+        f"--r-tick:{rank_ticker.get(ticker, 0)};"
+    )
+    return (
+        f'<div class="hrp-row" style="{order_style}" data-weight="{hrp_w}">'
+        f'<span class="rank">{rank}</span>'
+        f'<span class="ticker">{ticker_esc}</span>'
+        f'<span class="hrp-pill">{weight_pct}</span>'
+        f'<span class="meta">'
+        f'<span class="name">{name}</span>'
+        f'<span class="dot">·</span>'
+        f'<span class="sector">{sector}</span>'
+        f'</span>'
+        f'<span class="cash-mini">{cash_text}</span>'
+        '</div>'
+    )
+
+
 _LIST_HEADER = (
     '<div class="list-header">'
     '<span class="col-rank">#</span>'
     '<span class="col-name">Stock</span>'
     '<span class="col-comp">Composite</span>'
     '</div>'
+)
+
+_HRP_LIST_HEADER = (
+    '<div class="list-header">'
+    '<span class="col-rank">#</span>'
+    '<span class="col-name">Stock</span>'
+    '<span class="col-comp">Weight</span>'
+    '</div>'
+)
+
+
+_HRP_METHODOLOGY = (
+    '<details class="sub-drawer">'
+    '<summary>How HRP weights are computed</summary>'
+    '<p>Hierarchical Risk Parity (López de Prado, 2016). On the top 25 by '
+    'composite score, build a 25×25 sample covariance from the last 504 '
+    'trading days of <i>residual</i> daily log returns (each stock already '
+    'orthogonalised against the market and its sector residual upstream). '
+    'Convert correlations to a distance metric d_ij = √(0.5·(1 − ρ_ij)), '
+    'cluster with average-link agglomerative clustering, and use the leaf '
+    'order from that tree as the asset ordering.</p>'
+    '<p>Recursively bisect the ordered list at each midpoint. At every split, '
+    'compute the inverse-variance-weighted variance of each side and allocate '
+    'weight inversely proportional to those variances. Long-only by '
+    'construction; weights sum to 1.</p>'
+    '<p><b>Not yet wired (future):</b> volatility targeting (scale weights to '
+    'a target portfolio sigma), name caps, sector caps, shrinkage on the '
+    'covariance estimator. v0.1 keeps the framework minimal so the moving '
+    'parts are visible.</p>'
+    '</details>'
 )
 
 
@@ -635,7 +792,35 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         '</details>'
     )
 
-    # --- Section 2: Full Ranking (default closed) ---
+    # --- Section 2: Weighted Top 25 (HRP, default closed) ---
+    hrp_df = ranked_df[ranked_df["hrp_weight"] > 0] if "hrp_weight" in ranked_df.columns else ranked_df.iloc[0:0]
+    hrp_rows_html = "".join(
+        _hrp_row_html(t, r, names, cash,
+                      rank_composite, rank_cash, rank_sector, rank_ticker)
+        for t, r in hrp_df.iterrows()
+    )
+    hrp_lookback = factors_used.get("hrp_lookback", 504)
+    hrp_subtitle = (
+        f"HRP-weighted, top {len(hrp_df)} by composite "
+        f"({hrp_lookback}d residual cov)"
+    )
+    hrp_section = (
+        '<details class="section">'
+        '<summary>'
+        '<div class="section-head">'
+        '<div class="section-title">Weighted Top 25</div>'
+        f'<div class="section-subtitle">{hrp_subtitle}</div>'
+        '</div>'
+        '</summary>'
+        '<div class="section-body">'
+        f'{_HRP_LIST_HEADER}'
+        f'<div class="list">{hrp_rows_html}</div>'
+        f'{_HRP_METHODOLOGY}'
+        '</div>'
+        '</details>'
+    )
+
+    # --- Section 3: Full Ranking (default closed) ---
     full_rows_html = "".join(
         _row_html(t, r, names, weights, cash,
                   rank_composite, rank_cash, rank_sector, rank_ticker)
@@ -699,6 +884,7 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         '</div>'
         '</div>'
         f'{portfolio_section}'
+        f'{hrp_section}'
         f'{full_section}'
         f'{methodology_section}'
         f'{_JS}'

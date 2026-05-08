@@ -14,7 +14,7 @@ import store
 import weights as weights_mod
 from config import (
     MARKET_TICKER, TOP_N, WEIGHTING_SCHEME, WEIGHT_LOOKBACK_DAYS,
-    CASH_DEPLOYMENT,
+    CASH_DEPLOYMENT, BETA_LOOKBACK_DAYS,
 )
 from universe import load_sector_etf_map, ticker_to_sector
 
@@ -132,10 +132,22 @@ def main():
         WEIGHTING_SCHEME, returns, top_tickers, WEIGHT_LOOKBACK_DAYS,
     )
     ranked["weight"] = ranked.index.map(w).fillna(0.0)
+
+    # Weighted Top 25: HRP on residual returns over the beta lookback window.
+    # stock_resid is preferred over raw `returns` so the covariance reflects
+    # market- and sector-orthogonalised stock returns; falls back to raw
+    # returns automatically inside hrp_weights if a column is missing.
+    hrp_input = stock_resid if not stock_resid.empty else returns
+    hrp_w = weights_mod.compute_weights(
+        "hrp", hrp_input, top_tickers, BETA_LOOKBACK_DAYS,
+    )
+    ranked["hrp_weight"] = ranked.index.map(hrp_w).fillna(0.0)
+
     cash = args.cash if args.cash is not None else CASH_DEPLOYMENT
     factors_used["weighting_scheme"] = WEIGHTING_SCHEME
     factors_used["top_n"] = top_n
     factors_used["cash_deployment"] = float(cash)
+    factors_used["hrp_lookback"] = BETA_LOOKBACK_DAYS
     factors_used["sort"] = args.sort
     factors_used["universe_total"] = len(ranked)
 
