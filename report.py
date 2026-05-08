@@ -7,6 +7,7 @@ Progressive disclosure via native <details>:
 
 No JavaScript — works in iOS Quick Look, Safari, and desktop browsers alike.
 """
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -68,10 +69,20 @@ details.row > summary::marker { display: none; }
 .meta {
   grid-row: 2; grid-column: 2 / span 2;
   font-size: 13px; color: #6b6b70;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: baseline; gap: 6px;
+  min-width: 0;
 }
-.meta .name { color: #1c1c1e; }
-.meta .dot { margin: 0 6px; opacity: 0.5; }
+.meta .name {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #1c1c1e;
+}
+.meta .dot { flex: 0 0 auto; opacity: 0.5; }
+.meta .sector { flex: 0 0 auto; white-space: nowrap; }
+.full-name {
+  font-size: 13px; color: #6b6b70;
+  margin-top: 10px; margin-bottom: -2px;
+}
 
 .expanded { padding: 0 14px 14px; }
 .expanded .divider { border-top: 1px solid #e8e8eb; margin: 0 0 12px; }
@@ -148,6 +159,7 @@ details.methodology p {
   .ticker { color: #ececec; }
   .meta { color: #8e8e93; }
   .meta .name { color: #ececec; }
+  .full-name { color: #8e8e93; }
   .rank { color: #8e8e93; }
   .expanded .divider { border-top-color: #2c2c2e; }
   .factors .label, .factors .contrib { color: #ececec; }
@@ -168,6 +180,47 @@ details.methodology p {
   .pill.flat        { background: #2c2c2e; color: #ececec; }
 }
 """
+
+
+# Suffix must be preceded by whitespace or a comma so we never chew the inside
+# of a word — "Equinor ASA" must NOT match the S.A. pattern, etc. Holdings /
+# Group are intentionally NOT in this list because they're often substantive.
+_SUFFIX_PATTERNS = [
+    r"[\s,]+Incorporated$",
+    r"[\s,]+Inc\.?$",
+    r"[\s,]+Corporation$",
+    r"[\s,]+Corp\.?$",
+    r"[\s,]+Company$",
+    r"[\s,]+Co\.?$",
+    r"[\s,]+Limited$",
+    r"[\s,]+Ltd\.?$",
+    r"[\s,]+plc$",
+    r"[\s,]+PLC$",
+    r"[\s,]+N\.?V\.?$",
+    r"[\s,]+S\.?A\.?$",
+    r"[\s,]+S\.?E\.?$",
+    r"[\s,]+A\.?G\.?$",
+    r"[\s,]+ASA$",
+    r"[\s,]+AB$",
+    r"[\s,]+GmbH$",
+]
+_SUFFIX_RE = [re.compile(p, re.IGNORECASE) for p in _SUFFIX_PATTERNS]
+
+
+def _short_name(name: str) -> str:
+    """Strip common corporate suffixes so collapsed rows scan cleanly."""
+    if not name:
+        return name
+    out = name
+    # Apply repeatedly to peel compound suffixes ("Company Limited", "Holdings Inc").
+    for _ in range(4):
+        before = out
+        for rx in _SUFFIX_RE:
+            out = rx.sub("", out)
+        if out == before:
+            break
+    out = out.rstrip(",.- ").strip()
+    return out or name
 
 
 def _escape(text) -> str:
@@ -274,8 +327,14 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
         composite = float(comp_val) if pd.notna(comp_val) else None
         pill_cls = _pill_class(composite)
         composite_text = f"{composite:+.3f}" if composite is not None else "—"
-        name = _escape(names.get(ticker, ticker))
         ticker_esc = _escape(ticker)
+
+        full_name = names.get(ticker, ticker) or ticker
+        short_name = _short_name(full_name)
+        name = _escape(short_name)
+        full_name_block = ""
+        if short_name != full_name:
+            full_name_block = f'<div class="full-name">{_escape(full_name)}</div>'
 
         weight_val = row.get("weight")
         weight = float(weight_val) if pd.notna(weight_val) else 0.0
@@ -311,11 +370,15 @@ def render(ranked_df: pd.DataFrame, names: dict, factors_used: dict) -> str:
             f'<span class="rank">{rank}</span>'
             f'<span class="ticker">{ticker_esc}</span>'
             f'<span class="pill {pill_cls}">{composite_text}</span>'
-            f'<span class="meta"><span class="name">{name}</span>'
-            f'<span class="dot">·</span>{sector}</span>'
+            f'<span class="meta">'
+            f'<span class="name">{name}</span>'
+            f'<span class="dot">·</span>'
+            f'<span class="sector">{sector}</span>'
+            f'</span>'
             '</summary>'
             '<div class="expanded">'
             '<div class="divider"></div>'
+            f'{full_name_block}'
             f'<div class="factors">{factor_rows}</div>'
             f'<div class="explain">{explanation}</div>'
             f'{cash_block}'
