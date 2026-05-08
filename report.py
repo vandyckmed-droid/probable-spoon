@@ -300,10 +300,13 @@ details.row > summary::marker { display: none; }
 }
 .logo {
   flex: 0 0 auto;
+  display: inline-block;
   width: 22px; height: 22px;
   border-radius: 5px;
-  object-fit: contain;
-  background: #f5f5f7;
+  background-color: #f5f5f7;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 .pill {
   grid-row: 1; grid-column: 3;
@@ -706,9 +709,13 @@ def _row_html(
     logo_url = (logos or {}).get(ticker, "")
     logo_html = ""
     if logo_url and rank_composite.get(ticker, 9999) < 50:
+        # Sanitize quotes so the URL is safe inside the inline style attribute.
+        safe_url = (
+            logo_url.replace("'", "%27").replace('"', "%22")
+            .replace("<", "%3C").replace(">", "%3E")
+        )
         logo_html = (
-            f'<img class="logo" src="{_escape(logo_url)}" alt="" '
-            f'loading="lazy" referrerpolicy="no-referrer">'
+            f"<span class=\"logo\" style=\"background-image:url('{safe_url}')\"></span>"
         )
 
     return (
