@@ -13,6 +13,11 @@ from pathlib import Path
 import pandas as pd
 
 import snapshots
+from config import (
+    Q_GP_W, Q_GP_CHANGE_W, Q_NETDEBT_W,
+    V_EBIT_EV_W, V_FCF_EV_W, V_BP_W,
+    MOM_W_12_1, MOM_W_6_1,
+)
 
 
 _CSS = """
@@ -570,58 +575,107 @@ svg.resid-chart {
 .pullback-legend b { font-weight: 700; letter-spacing: 0.08em; }
 
 /* Factor block in drawer */
+/* Factor table: each row is its own grid with fixed column widths so the
+   leader's larger font does not break alignment between rows. M/Q/V rows
+   are tappable <details>; the composite total row is a static block. */
 .factors {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  column-gap: 22px; row-gap: 9px;
   font-size: 13px;
   margin-top: 4px;
 }
-.factors .label { color: var(--text); }
-.factors .z, .factors .contrib {
-  font-family: var(--tabular);
-  font-variant-numeric: tabular-nums; text-align: right;
+.factor-row {
+  margin: 0;
 }
-.factors .z { color: var(--text-muted); }
-.factors .contrib { color: var(--text); font-weight: 500; }
-.factors .contrib .w {
+.factor-row > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.factor-row > summary::-webkit-details-marker { display: none; }
+.factor-line {
+  display: grid;
+  grid-template-columns: 1fr 80px 120px;
+  column-gap: 18px;
+  align-items: baseline;
+  padding: 6px 0;
+}
+.factor-line .label { color: var(--text); }
+.factor-line .z, .factor-line .contrib {
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.factor-line .z { color: var(--text-muted); }
+.factor-line .contrib { color: var(--text); font-weight: 500; }
+.factor-line .contrib .w {
   color: var(--text-faint); font-weight: 400; margin-left: 6px;
 }
-/* Factor z cells take their colour from an inline rgb() gradient
-   (interpolated by |z|) so neighbouring rows show subtly different shades
-   instead of snapping into three buckets. The composite pill keeps its own
-   bucket palette below. */
+.factor-line .muted { color: var(--text-faint); font-weight: 400; }
 
-/* Leading factor: subtle emphasis. A small caret before the label and a
-   slight font-weight bump on the contribution column — enough to draw
-   the eye without shouting. */
-.factors .label.leader { font-weight: 600; }
-.factors .label.leader::before {
-  content: "›";
-  margin-right: 6px;
-  color: var(--text-faint);
-  font-weight: 400;
+/* Leading factor: bigger + bolder text, no marker. Same column widths,
+   so rows stay vertically aligned. */
+.factor-row.leader .factor-line .label,
+.factor-row.leader .factor-line .z,
+.factor-row.leader .factor-line .contrib {
+  font-size: 15px;
+  font-weight: 700;
 }
-.factors .contrib.leader { font-weight: 600; }
-.factors .z.leader { font-weight: 600; }
-.factors .total .label,
-.factors .total .contrib {
+
+/* Composite total row */
+.factor-row.total .factor-line {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 4px;
+}
+.factor-row.total .factor-line .label,
+.factor-row.total .factor-line .contrib {
   font-weight: 700;
   font-size: 17px;
   color: var(--text-strong);
   letter-spacing: -0.01em;
 }
-.factors .total .contrib.up-strong   { color: var(--accent-up); }
-.factors .total .contrib.up-light    { color: var(--accent-up); opacity: 0.85; }
-.factors .total .contrib.down-strong { color: var(--accent-down); }
-.factors .total .contrib.down-light  { color: var(--accent-down); opacity: 0.85; }
-.factors .total .label,
-.factors .total .z,
-.factors .total .contrib {
-  border-top: 1px solid var(--line);
-  padding-top: 10px; margin-top: 4px;
+.factor-row.total .factor-line .contrib.up-strong   { color: var(--accent-up); }
+.factor-row.total .factor-line .contrib.up-light    { color: var(--accent-up); opacity: 0.85; }
+.factor-row.total .factor-line .contrib.down-strong { color: var(--accent-down); }
+.factor-row.total .factor-line .contrib.down-light  { color: var(--accent-down); opacity: 0.85; }
+
+/* Sub-component detail drawer */
+.factor-detail {
+  padding: 6px 0 8px 14px;
+  border-left: 2px solid var(--line);
+  margin: 2px 0 6px 4px;
 }
-.factors .muted { color: var(--text-faint); font-weight: 400; }
+.fd-table { margin: 0; }
+.fd-row {
+  display: grid;
+  grid-template-columns: 1fr 70px 50px;
+  column-gap: 12px;
+  align-items: baseline;
+  padding: 3px 0 1px;
+}
+.fd-name { color: var(--text); font-size: 12px; }
+.fd-z {
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  font-size: 12px;
+}
+.fd-w {
+  font-family: var(--tabular);
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.fd-w-diag {
+  font-style: italic;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.fd-raw {
+  margin: 0 0 4px 0;
+  color: var(--text-faint);
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
 
 /* Per-ticker normalisation/residualisation provenance — quiet by design,
    one short line under the factor table. */
@@ -1133,7 +1187,72 @@ def _z_gradient_color(z) -> str:
     return f"rgb({r},{g},{b})"
 
 
-def _factor_row(label: str, weight, z, leader: bool = False) -> str:
+def _factor_detail_html(factor: str, row) -> str:
+    """Sub-component breakdown for a tappable factor drawer.
+
+    Each row shows component name, σ-z, and weight; a small grey raw-value
+    line sits beneath. Same z-gradient palette as the parent row so colours
+    stay consistent.
+    """
+    if factor == "momentum":
+        components = [
+            ("12-1 sleeve",            row.get("m12_z"),       MOM_W_12_1, row.get("m12_raw")),
+            ("6-1 sleeve",             row.get("m6_z"),        MOM_W_6_1,  row.get("m6_raw")),
+            ("1m reversal · diagnostic", row.get("m1_z"),      None,       row.get("m1_raw")),
+        ]
+    elif factor == "quality":
+        components = [
+            ("Gross profitability (GP/Assets)", row.get("gp_z"),        Q_GP_W,        row.get("gross_profitability")),
+            ("Δ GP / Assets (YoY)",        row.get("gp_change_z"), Q_GP_CHANGE_W, row.get("gp_change")),
+            ("− Net debt / Assets",        row.get("nd_z"),        Q_NETDEBT_W,   row.get("balance_sheet_quality")),
+        ]
+    elif factor == "value":
+        components = [
+            ("EBIT / EV",         row.get("ebit_ev_z"), V_EBIT_EV_W, row.get("ebit_ev")),
+            ("FCF / EV",          row.get("fcf_ev_z"),  V_FCF_EV_W,  row.get("fcf_ev")),
+            ("Book / Market cap", row.get("book_mc_z"), V_BP_W,      row.get("book_mc")),
+        ]
+    else:
+        return ""
+
+    rows: list[str] = []
+    for name, z, w, raw in components:
+        z_str = _fmt_z(z)
+        z_color = (
+            _z_gradient_color(z)
+            if z is not None and not pd.isna(z) else ""
+        )
+        z_style = f' style="color:{z_color}"' if z_color else ""
+        if w is None:
+            w_str = '<span class="fd-w-diag">diag</span>'
+        else:
+            w_str = f"×{int(round(w*100))}%"
+        if raw is None or pd.isna(raw):
+            raw_html = ""
+        else:
+            raw_html = f'<div class="fd-raw">raw {raw:+.4f}</div>'
+        rows.append(
+            '<div class="fd-row">'
+            f'<span class="fd-name">{_escape(name)}</span>'
+            f'<span class="fd-z"{z_style}>{z_str}</span>'
+            f'<span class="fd-w">{w_str}</span>'
+            '</div>'
+            f'{raw_html}'
+        )
+    return f'<div class="fd-table">{"".join(rows)}</div>'
+
+
+def _factor_row(label: str, weight, z, *,
+                leader: bool = False, body: str = "",
+                key: str = "") -> str:
+    """One factor row in the expanded card.
+
+    When `body` is non-empty the row renders as a tappable <details>; when
+    empty it renders as a static block so non-tappable rows (e.g. coverage-
+    excluded factors) can share the same layout. The `key` arg is reserved
+    for callers that want to mark the row with a stable id (used to keep
+    DOM-level distinctness when a card has more than one factor table).
+    """
     z_html = _fmt_z(z)
     color = _z_gradient_color(z) if (z is not None and not pd.isna(z)) else ""
     z_style = f' style="color:{color}"' if color else ""
@@ -1147,10 +1266,22 @@ def _factor_row(label: str, weight, z, leader: bool = False) -> str:
             contrib = f"{z * weight:+.3f}"
         weight_html = f'<span class="w">{int(round(weight*100))}%</span>'
     lead_cls = " leader" if leader else ""
+    line_inner = (
+        f'<span class="label">{_escape(label)}</span>'
+        f'<span class="z"{z_style}>{z_html}</span>'
+        f'<span class="contrib">{contrib} {weight_html}</span>'
+    )
+    if body:
+        return (
+            f'<details class="factor-row{lead_cls}">'
+            f'<summary class="factor-line">{line_inner}</summary>'
+            f'<div class="factor-detail">{body}</div>'
+            '</details>'
+        )
     return (
-        f'<div class="label{lead_cls}">{label}</div>'
-        f'<div class="z{lead_cls}"{z_style}>{z_html}</div>'
-        f'<div class="contrib{lead_cls}">{contrib} {weight_html}</div>'
+        f'<div class="factor-row{lead_cls}">'
+        f'<div class="factor-line">{line_inner}</div>'
+        '</div>'
     )
 
 
@@ -1415,14 +1546,24 @@ def _row_html(
             continue
         _candidates.append((_key, abs(float(_z) * _w)))
     leader_key = max(_candidates, key=lambda x: x[1])[0] if _candidates else None
+    mom_body = _factor_detail_html("momentum", row)
+    qual_body = _factor_detail_html("quality", row)
+    val_body = _factor_detail_html("value", row)
     factor_rows = (
-        _factor_row("Momentum", weights.get("momentum"), mom_z, leader=(leader_key == "momentum"))
-        + _factor_row("Quality", weights.get("quality"), qual_z, leader=(leader_key == "quality"))
-        + _factor_row("Value", weights.get("value"), val_z, leader=(leader_key == "value"))
+        _factor_row("Momentum", weights.get("momentum"), mom_z,
+                    leader=(leader_key == "momentum"), body=mom_body)
+        + _factor_row("Quality", weights.get("quality"), qual_z,
+                      leader=(leader_key == "quality"), body=qual_body)
+        + _factor_row("Value", weights.get("value"), val_z,
+                      leader=(leader_key == "value"), body=val_body)
         + (
-            '<div class="label total">Composite</div>'
-            '<div class="z total"></div>'
-            f'<div class="contrib total {total_cls}">{composite_text}</div>'
+            '<div class="factor-row total">'
+            '<div class="factor-line total">'
+            '<span class="label">Composite</span>'
+            '<span class="z"></span>'
+            f'<span class="contrib {total_cls}">{composite_text}</span>'
+            '</div>'
+            '</div>'
         )
     )
 
