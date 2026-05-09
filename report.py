@@ -1021,17 +1021,20 @@ def _residual_chart_svg(
     corner labels.
     """
     if not values or len(values) < 2:
-        return "", 0.10
+        return "", 1.0
     vmin, vmax = min(values), max(values)
     peak = max(abs(vmin), abs(vmax))
-    if peak <= 0.10:
-        cap = 0.10
-    elif peak <= 0.15:
-        cap = 0.15
-    elif peak <= 0.25:
-        cap = 0.25
+    # σ-scale: snap to friendly round caps until peak is large.
+    if peak <= 1.0:
+        cap = 1.0
+    elif peak <= 2.0:
+        cap = 2.0
+    elif peak <= 3.0:
+        cap = 3.0
+    elif peak <= 5.0:
+        cap = 5.0
     else:
-        cap = (int((peak * 1.1) * 20) + 1) / 20.0
+        cap = float(int(peak * 1.1) + 1)
     margin_y = 6
     n = len(values)
 
@@ -1278,21 +1281,20 @@ def _row_html(
     explanation = _explain(mom_z, qual_z, val_z)
 
     diag = (diagnostics or {}).get(ticker) or {}
-    chart_series = diag.get("chart_63d") or []
-    current_63d = diag.get("current_63d")
-    sigma_reading = diag.get("sigma_reading")
+    chart_series = diag.get("chart_m6") or []
+    current_m6 = diag.get("current_m6")
     pullback_z = diag.get("pullback_z")
 
     # Per-ticker gradient id keeps SVG defs from colliding across rows.
     safe_id = _escape(ticker).replace('.', '_').replace('-', '_')
 
-    # Mini residual sparkline + small percent badge in the collapsed row.
+    # Mini residual sparkline + small sigma badge in the collapsed row.
     if chart_series:
         mini_spark_html = _mini_residual_svg(chart_series, grad_id=f"mg_{safe_id}")
-        cur_pct = float(current_63d) if current_63d is not None else 0.0
-        pct_cls = "up" if cur_pct >= 0 else "down"
+        cur_sig = float(current_m6) if current_m6 is not None else 0.0
+        pct_cls = "up" if cur_sig >= 0 else "down"
         mini_pct_html = (
-            f'<span class="mini-pct {pct_cls}">{cur_pct*100:+.1f}%</span>'
+            f'<span class="mini-pct {pct_cls}">{cur_sig:+.2f}σ</span>'
         )
     else:
         mini_spark_html = ""
@@ -1316,26 +1318,23 @@ def _row_html(
             '</div>'
         )
 
-    # Big 63d residual chart + 21d pullback indicator. Top-25 only.
+    # Big 6-1 residual-momentum chart + 21d pullback indicator. Top-25 only.
     diagnostics_block = ""
     if chart_series and rank_composite.get(ticker, 9999) < 25:
         svg, cap = _residual_chart_svg(chart_series, grad_id=f"rg_{safe_id}")
         if svg:
-            cur_pct = float(current_63d) if current_63d is not None else 0.0
-            sig = float(sigma_reading) if sigma_reading is not None else 0.0
-            cur_cls = "up" if cur_pct >= 0 else "down"
-            sig_cls = "up" if sig >= 0 else "down"
-            cap_label = f"{cap*100:.0f}%"
+            cur_sig = float(current_m6) if current_m6 is not None else 0.0
+            cur_cls = "up" if cur_sig >= 0 else "down"
+            cap_label = f"{cap:.1f}σ"
             chart_block = (
                 '<div class="resid-block">'
                 '<div class="resid-head">'
                 '<div class="resid-title">'
-                '<span class="resid-label">63D RESIDUAL RETURN</span>'
-                '<span class="resid-axis">(vs Market)</span>'
+                '<span class="resid-label">6-1 RESIDUAL MOMENTUM</span>'
+                '<span class="resid-axis">(σ-scaled)</span>'
                 '</div>'
                 '<div class="resid-readout">'
-                f'<span class="resid-value {cur_cls}">{cur_pct*100:+.1f}%</span>'
-                f'<span class="resid-sigma {sig_cls}">({sig:+.1f}σ)</span>'
+                f'<span class="resid-value {cur_cls}">{cur_sig:+.2f}σ</span>'
                 '</div>'
                 '</div>'
                 '<div class="resid-chart-wrap">'
@@ -1343,11 +1342,12 @@ def _row_html(
                 f'<div class="resid-axis-tr">+{cap_label}</div>'
                 f'<div class="resid-axis-bl">−{cap_label}</div>'
                 f'<div class="resid-axis-br">−{cap_label}</div>'
-                f'<div class="resid-axis-zero">0%</div>'
+                f'<div class="resid-axis-zero">0σ</div>'
                 f'{svg}'
                 '</div>'
-                '<p class="resid-desc">Rolling 63-day cumulative residual '
-                'return after market removal.'
+                '<p class="resid-desc">Rolling 6-1 residual momentum sleeve '
+                '(126d lookback, 21d skip, divided by 63d residual σ) — '
+                'endpoint equals the momentum composite\'s m6 input.'
                 + (
                     f' <span class="resid-ema">· EMA({int(diag.get("ema_span") or 1)})</span>'
                     if int(diag.get("ema_span") or 1) > 1 else ''

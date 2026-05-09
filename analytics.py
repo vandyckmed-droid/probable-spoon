@@ -185,55 +185,65 @@ def compute_diagnostics(
 ) -> dict:
     """Per-ticker residual diagnostics for the expanded card.
 
-    Returns a dict keyed by ticker with:
-        chart_63d:     [floats], rolling 63-day cumulative residual
-                        return over the last `chart_lookback` trading days
-                        (display series for the residual chart).
-        current_63d:   float, the most recent 63-day cumulative residual
-                        (last value of chart_63d).
-        sigma_reading: float, current_63d divided by (sigma_daily * sqrt(63));
-                        a sigma-style read of "how unusual is this 63d move".
-        pullback_z:    float, last 21d cumulative residual divided by
-                        (sigma_daily * sqrt(21)) — short-term timing aid.
+    The chart series is the rolling 6-1 residual-momentum sleeve used in the
+    momentum composite, evaluated at every date over the lookback. At each
+    date `e` the value is
 
-    sigma_daily is the stdev of the most recent 63 daily residuals (with the
-    same SIGMA_FLOOR safeguard used in compute_residual_momentum).
+        sum(resid[e - MOM_SHORT_DAYS + 1 : e - MOM_SKIP_DAYS + 1])
+            / max(std(resid[e - SIGMA_DAYS + 1 : e + 1], ddof=0), SIGMA_FLOOR)
+
+    so the endpoint matches `m6_raw` in `compute_residual_momentum` exactly.
+    Values are in σ units (residual std) — no separate sigma reading needed.
+
+    Returns a dict keyed by ticker with:
+        chart_m6:    [floats], the rolling sigma-scaled 6-1 series
+                      (last `chart_lookback` trading days).
+        current_m6:  float, the most recent value of chart_m6 — i.e. the
+                      m6_raw used in the momentum composite, in σ units.
+        pullback_z:  float, last 21d cumulative residual / (sigma_daily *
+                      sqrt(21)) — raw short-term timing aid.
+        ema_span:    int, EMA span applied to the chart series (1 = none).
     """
     out: dict = {}
     if stock_residuals is None or stock_residuals.empty:
         return out
     ema_span = max(1, int(CHART_EMA_SPAN))
+    sum_window = MOM_SHORT_DAYS - MOM_SKIP_DAYS
     for t in tickers:
         if t not in stock_residuals.columns:
             continue
         s = stock_residuals[t].dropna()
-        if len(s) < SIGMA_DAYS:
+        if len(s) < MOM_SHORT_DAYS:
             continue
-        rolling = s.rolling(SIGMA_DAYS).sum().dropna()
-        if rolling.empty:
+        # Rolling 6-1 numerator: sum of the 105-day window that ends 21 days
+        # before each date. Shifting by MOM_SKIP_DAYS first, then summing the
+        # next (MOM_SHORT_DAYS - MOM_SKIP_DAYS) days, gives exactly the slice
+        # arr[-MOM_SHORT_DAYS:-MOM_SKIP_DAYS] when evaluated at the endpoint.
+        rolling_sum = s.shift(MOM_SKIP_DAYS).rolling(sum_window).sum()
+        rolling_sigma = (
+            s.rolling(SIGMA_DAYS).std(ddof=0).clip(lower=SIGMA_FLOOR)
+        )
+        m6_series = (rolling_sum / rolling_sigma).dropna()
+        if m6_series.empty:
             continue
-        # Very gentle EMA on the chart series so day-to-day noise does not
-        # zigzag a chart that is meant to read as longer-horizon strength.
-        # The readouts (current 63d, sigma reading) follow the smoothed line
-        # so the chart's endpoint and the headline number stay in sync; the
-        # pullback z below stays raw because it is explicitly a short-term
-        # timing aid.
+        # Very gentle EMA on the chart so day-to-day noise does not zigzag a
+        # chart that is meant to read as longer-horizon strength. The endpoint
+        # then no longer exactly equals m6_raw, so we report the raw last
+        # value as current_m6 to keep the headline tied to the composite.
         if ema_span > 1:
-            chart_full = rolling.ewm(span=ema_span, adjust=False).mean()
+            chart_full = m6_series.ewm(span=ema_span, adjust=False).mean()
         else:
-            chart_full = rolling
+            chart_full = m6_series
         chart = chart_full.tail(chart_lookback)
-        current_63d = float(chart.iloc[-1])
+        current_m6 = float(m6_series.iloc[-1])
         sigma_daily = max(float(s.tail(SIGMA_DAYS).std(ddof=0)), SIGMA_FLOOR)
-        sigma_reading = current_63d / (sigma_daily * float(np.sqrt(SIGMA_DAYS)))
         pullback_z = float("nan")
         if len(s) >= MOM_REV_DAYS:
             recent_21 = float(s.tail(MOM_REV_DAYS).sum())
             pullback_z = recent_21 / (sigma_daily * float(np.sqrt(MOM_REV_DAYS)))
         out[t] = {
-            "chart_63d": [float(x) for x in chart.tolist()],
-            "current_63d": current_63d,
-            "sigma_reading": float(sigma_reading) if np.isfinite(sigma_reading) else 0.0,
+            "chart_m6": [float(x) for x in chart.tolist()],
+            "current_m6": current_m6,
             "pullback_z": float(pullback_z) if np.isfinite(pullback_z) else 0.0,
             "ema_span": ema_span,
         }
