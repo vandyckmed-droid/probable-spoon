@@ -293,14 +293,18 @@ details.row > summary::marker { display: none; }
 
 .sparkline-row { margin: 10px 0 6px; }
 .sparkline-cap {
+  display: flex; justify-content: space-between; align-items: baseline;
   font-size: 11px; font-weight: 600;
-  color: #8e8e93;
   text-transform: uppercase; letter-spacing: 0.05em;
   margin-bottom: 4px;
 }
+.sparkline-label { color: #8e8e93; }
+.sparkline-pct.up   { color: #2e9e60; }
+.sparkline-pct.down { color: #c0392b; }
 .sparkline {
   display: block;
   width: 100%; height: 40px;
+  color: #6b6b70;  /* baseline currentColor in light mode */
 }
 
 .pill.up-strong   { background: #2ecc71; color: #0d3a1f; }
@@ -353,6 +357,10 @@ details.row > summary::marker { display: none; }
   .factors .muted { color: #6b6b70; }
   .explain { color: #aeaeb2; }
   .cash-line { color: #ececec; }
+  .sparkline { color: #aeaeb2; }
+  .sparkline-label { color: #8e8e93; }
+  .sparkline-pct.up   { color: #44c777; }
+  .sparkline-pct.down { color: #ff7b7b; }
   .pill.up-light    { background: #14401f; color: #79e29c; }
   .pill.down-light  { background: #4a1410; color: #ff9c91; }
   .pill.flat        { background: #2c2c2e; color: #ececec; }
@@ -522,10 +530,13 @@ def _factor_row(label: str, weight, z) -> str:
 
 
 def _sparkline_svg(values: list[float], width: int = 280, height: int = 40) -> str:
-    """Inline SVG polyline over a normalised price series.
+    """Inline SVG sparkline with a subtle start-price baseline.
 
-    Stroke is green when the last point >= the first, red otherwise.
-    Returns an empty string for too-short or degenerate input.
+    A faint horizontal reference line sits at the start price so net
+    direction is readable at a glance — points above it are gains over
+    the window, points below are losses. Stroke colour is a muted green
+    if the window is net positive, muted red if net negative. Returns
+    an empty string for too-short or degenerate input.
     """
     if not values or len(values) < 2:
         return ""
@@ -534,17 +545,29 @@ def _sparkline_svg(values: list[float], width: int = 280, height: int = 40) -> s
     if rng <= 0:
         return ""
     n = len(values)
+    margin = 2
+
+    def y_of(v: float) -> float:
+        return height - margin - (v - vmin) / rng * (height - 2 * margin)
+
     pts = " ".join(
-        f"{i * width / (n - 1):.1f},{height - (v - vmin) / rng * (height - 2) - 1:.1f}"
+        f"{i * width / (n - 1):.1f},{y_of(v):.1f}"
         for i, v in enumerate(values)
     )
-    color = "#2ecc71" if values[-1] >= values[0] else "#e74c3c"
+    base_y = y_of(values[0])
+    up = values[-1] >= values[0]
+    # Muted, mobile-friendly direction colours; baseline uses currentColor so
+    # it follows the surrounding text (and adapts to dark mode automatically).
+    line_color = "#2e9e60" if up else "#c0392b"
     return (
         f'<svg class="sparkline" viewBox="0 0 {width} {height}" '
-        f'preserveAspectRatio="none" '
-        f'xmlns="http://www.w3.org/2000/svg">'
-        f'<polyline fill="none" stroke="{color}" stroke-width="1.5" '
-        f'stroke-linejoin="round" stroke-linecap="round" points="{pts}"/>'
+        f'preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
+        f'<line x1="0" y1="{base_y:.1f}" x2="{width}" y2="{base_y:.1f}" '
+        f'stroke="currentColor" stroke-opacity="0.18" stroke-width="1" '
+        f'vector-effect="non-scaling-stroke"/>'
+        f'<polyline fill="none" stroke="{line_color}" stroke-width="1.5" '
+        f'stroke-linejoin="round" stroke-linecap="round" '
+        f'vector-effect="non-scaling-stroke" points="{pts}"/>'
         '</svg>'
     )
 
@@ -644,11 +667,18 @@ def _row_html(
 
     sparkline_block = ""
     if sparklines and rank_composite.get(ticker, 9999) < 25:
-        svg = _sparkline_svg(sparklines.get(ticker) or [])
-        if svg:
+        series = sparklines.get(ticker) or []
+        svg = _sparkline_svg(series)
+        if svg and series and series[0] != 0:
+            pct = series[-1] / series[0] - 1.0
+            pct_cls = "up" if pct >= 0 else "down"
+            pct_str = f"{pct*100:+.2f}%"
             sparkline_block = (
                 '<div class="sparkline-row">'
-                '<div class="sparkline-cap">21-day price</div>'
+                '<div class="sparkline-cap">'
+                '<span class="sparkline-label">21-day price</span>'
+                f'<span class="sparkline-pct {pct_cls}">21d: {pct_str}</span>'
+                '</div>'
                 f'{svg}'
                 '</div>'
             )
