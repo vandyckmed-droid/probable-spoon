@@ -524,8 +524,8 @@ svg.resid-chart {
   font-size: 14px; font-weight: 700;
   letter-spacing: -0.01em;
 }
-.pullback-z.up   { color: var(--accent-up); }
-.pullback-z.down { color: var(--accent-down); }
+/* pullback-z colour is set inline via _z_gradient_color(-z) so it tracks
+   the dot's position on the bar instead of the raw arithmetic sign. */
 .pullback-status {
   font-size: 11px; font-weight: 600;
 }
@@ -1183,7 +1183,12 @@ def _pullback_indicator_html(z: float | None) -> str:
         status_label = "Neutral"
         status_cls = "neutral"
 
-    z_cls = "up" if z >= 0 else "down"
+    # Pullback semantics invert the usual sign convention: negative z is
+    # healthy (oversold, green end of bar), positive z is extended (red end).
+    # Colour the numeric readout off −z so it tracks the dot's position on
+    # the gradient bar instead of the raw arithmetic sign.
+    z_color = _z_gradient_color(-z)
+    z_style = f' style="color:{z_color}"' if z_color else ""
     z_text = f"Pullback Z: {z:+.1f}σ"
 
     return (
@@ -1194,7 +1199,7 @@ def _pullback_indicator_html(z: float | None) -> str:
         '<span class="pullback-axis">(vs 21D σ)</span>'
         '</div>'
         '<div class="pullback-readout">'
-        f'<span class="pullback-z {z_cls}">{z_text}</span>'
+        f'<span class="pullback-z"{z_style}>{z_text}</span>'
         f'<span class="pullback-status {status_cls}">{status_label}</span>'
         '</div>'
         '</div>'
