@@ -95,12 +95,20 @@ def _build_universe_pulse(
 
     sectors: dict[str, int] = {}
     industries: dict[str, int] = {}
+    # Track tickers that are missing classification — either because we have
+    # no profile at all (unclassified) or because the profile sector is empty
+    # (unknown sector). The user wants to be able to audit this list.
+    unclassified_rows: list[tuple[str, str]] = []
     for t in tickers:
         prof = profiles_data.get(t) or {}
-        sec = (prof.get("sector") or "Unknown").strip() or "Unknown"
+        sec_raw = (prof.get("sector") or "").strip()
+        sec = sec_raw or "Unknown"
         ind = (prof.get("industry") or "Unknown").strip() or "Unknown"
         sectors[sec] = sectors.get(sec, 0) + 1
         industries[ind] = industries.get(ind, 0) + 1
+        if not prof or not sec_raw:
+            name = (prof.get("company_name") or "").strip()
+            unclassified_rows.append((t, name))
 
     sector_rows = sorted(sectors.items(), key=lambda kv: (-kv[1], kv[0]))
     industry_rows = sorted(industries.items(), key=lambda kv: (-kv[1], kv[0]))
@@ -136,6 +144,7 @@ def _build_universe_pulse(
         "industries": industry_rows,
         "market_cap": mc_stats,
         "buckets": bucket_counts,
+        "unclassified": sorted(unclassified_rows),
     }
 
 
@@ -388,11 +397,18 @@ def main():
         tickers, profiles_data, labels, ranked,
     )
     excluded_by_reason: dict[str, list[str]] = {}
+    excluded_named_by_reason: dict[str, list[tuple[str, str]]] = {}
     for _t, _reason in excluded.items():
-        excluded_by_reason.setdefault(exclusion_reason_label(_reason), []).append(_t)
+        _label = exclusion_reason_label(_reason)
+        excluded_by_reason.setdefault(_label, []).append(_t)
+        _name = ((profiles_data.get(_t) or {}).get("company_name") or "").strip()
+        excluded_named_by_reason.setdefault(_label, []).append((_t, _name))
     for _label in excluded_by_reason:
         excluded_by_reason[_label].sort()
+    for _label in excluded_named_by_reason:
+        excluded_named_by_reason[_label].sort(key=lambda p: p[0])
     factors_used["universe_excluded_by_reason"] = excluded_by_reason
+    factors_used["universe_excluded_named_by_reason"] = excluded_named_by_reason
 
     # Surface the latest price date so stale data is visible in the report
     # header. Uses the last index of the cached prices frame as the canonical

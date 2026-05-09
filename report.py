@@ -697,6 +697,60 @@ svg.resid-chart {
 .uni-collapse[open] > summary::before { transform: rotate(90deg); }
 .uni-industries { margin-top: 10px; font-size: 12px; }
 
+/* Drill-down pair lists used by the Unclassified / Hygiene drawers. */
+.uni-collapse-note {
+  font-size: 11px; color: var(--text-faint);
+  font-style: italic;
+  margin: 8px 0 10px;
+  line-height: 1.5;
+}
+.uni-pair-list {
+  display: flex; flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  margin-top: 6px;
+}
+.uni-pair-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  column-gap: 12px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--tabular);
+}
+.uni-pair-row:last-child { border-bottom: none; }
+.uni-pair-ticker {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.uni-pair-name {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.uni-hyg-group {
+  margin: 12px 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+.uni-hyg-group:first-of-type {
+  border-top: none;
+  margin-top: 6px;
+  padding-top: 0;
+}
+.uni-hyg-label {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-strong);
+  margin-bottom: 6px;
+}
+.uni-hyg-count {
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0;
+}
+
 .exp-row {
   display: flex; align-items: center; gap: 10px;
   margin-top: 14px; padding-top: 12px;
@@ -1539,6 +1593,84 @@ def _uni_table_rows(rows: list, total: int) -> str:
     return "".join(out)
 
 
+def _ticker_pair_rows(rows: list) -> str:
+    """Two-column rows for ticker + company-name lists in drill-downs.
+
+    `rows` is an iterable of (ticker, name) tuples. Empty names render an
+    em-dash so users can spot tickers that actually lack profile data
+    (i.e. genuine "unknowns" the pipeline never resolved).
+    """
+    if not rows:
+        return '<div class="uni-empty">None.</div>'
+    out = []
+    for ticker, name in rows:
+        name_text = _escape(name) if name else "—"
+        out.append(
+            '<div class="uni-pair-row">'
+            f'<span class="uni-pair-ticker">{_escape(ticker)}</span>'
+            f'<span class="uni-pair-name">{name_text}</span>'
+            '</div>'
+        )
+    return f'<div class="uni-pair-list">{"".join(out)}</div>'
+
+
+def _unclassified_drilldown(rows: list) -> str:
+    """Collapsible drawer showing every active ticker that lacks a sector.
+
+    These are the names the user wants to audit — either FMP returned no
+    profile, or the profile came back without a sector. Both cases show
+    here so they can decide whether to tighten hygiene or fetch fresher
+    profile data (--refresh).
+    """
+    if not rows:
+        return ""
+    return (
+        '<details class="uni-collapse">'
+        f'<summary>Unclassified or unknown sector ({len(rows)})</summary>'
+        '<p class="uni-collapse-note">'
+        'No profile or no sector returned by FMP. Run main.py --refresh '
+        'to top up profile data, or add to baseline hygiene if any of '
+        'these are genuinely junk that should be excluded.'
+        '</p>'
+        f'{_ticker_pair_rows(rows)}'
+        '</details>'
+    )
+
+
+def _hygiene_drilldown(by_reason_named: dict) -> str:
+    """Collapsible drawer listing every hygiene-excluded ticker, grouped
+    by the rule that fired, with company names so the user can spot
+    false positives (real common stock mislabelled) and false negatives
+    (junk that slipped through to the eligible set)."""
+    if not by_reason_named:
+        return ""
+    total = sum(len(v) for v in by_reason_named.values())
+    if total == 0:
+        return ""
+    blocks = []
+    for label in sorted(by_reason_named.keys()):
+        pairs = by_reason_named[label]
+        blocks.append(
+            f'<div class="uni-hyg-group">'
+            f'<div class="uni-hyg-label">{_escape(label)} '
+            f'<span class="uni-hyg-count">({len(pairs)})</span></div>'
+            f'{_ticker_pair_rows(pairs)}'
+            '</div>'
+        )
+    return (
+        '<details class="uni-collapse">'
+        f'<summary>Excluded by hygiene ({total})</summary>'
+        '<p class="uni-collapse-note">'
+        'Tickers the baseline hygiene rules dropped before scoring. '
+        'Audit the list to confirm each removal was correct — flag any '
+        'real common stock that was mislabelled, and look at the active '
+        'universe for junk that should have been caught here instead.'
+        '</p>'
+        f'{"".join(blocks)}'
+        '</details>'
+    )
+
+
 def _universe_section_html(factors_used: dict) -> str:
     """Build the Universe card.
 
@@ -1643,6 +1775,8 @@ def _universe_section_html(factors_used: dict) -> str:
             f'<summary>Industries ({len(industries)})</summary>'
             f'<div class="uni-table uni-industries">{industry_table}</div>'
             '</details>'
+            f'{_unclassified_drilldown(pulse.get("unclassified") or [])}'
+            f'{_hygiene_drilldown(factors_used.get("universe_excluded_named_by_reason") or {})}'
         )
 
     return (
