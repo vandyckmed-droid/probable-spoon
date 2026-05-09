@@ -46,9 +46,10 @@ V_EBIT_EV_W = 0.40
 V_FCF_EV_W  = 0.40
 V_BP_W      = 0.20
 
-# Coverage fallbacks
+# Coverage fallbacks / bucket sizing
 QUALITY_FALLBACK_THRESHOLD = 0.40
 VALUE_FALLBACK_THRESHOLD   = 0.40
+INDUSTRY_MIN_SIZE          = 25   # min industry bucket for industry-level z
 MIN_SECTOR_SIZE            = 5    # below this, fall back to universe-wide z
 
 # Portfolio weighting (applied to the top N composite-ranked names)

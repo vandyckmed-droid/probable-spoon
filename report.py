@@ -623,6 +623,19 @@ svg.resid-chart {
 }
 .factors .muted { color: var(--text-faint); font-weight: 400; }
 
+/* Per-ticker normalisation/residualisation provenance — quiet by design,
+   one short line under the factor table. */
+.scope-row {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.01em;
+}
+.scope-row b {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .explain {
   font-size: 13px; line-height: 1.65;
   color: var(--text-muted);
@@ -651,6 +664,23 @@ svg.resid-chart {
   grid-template-columns: 1fr auto 56px;
   column-gap: 12px; row-gap: 4px;
   font-size: 13px;
+}
+.norm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.norm-table th, .norm-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.norm-table .num {
+  text-align: right;
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-strong);
 }
 .uni-row {
   display: contents;
@@ -1322,6 +1352,34 @@ def _row_html(
 
     explanation = _explain(mom_z, qual_z, val_z)
 
+    # Per-ticker normalisation / residualisation provenance line. Only
+    # surfaced when present so older snapshots without the columns degrade
+    # gracefully. Stays low in the visual hierarchy.
+    q_scope = row.get("quality_scope")
+    v_scope = row.get("value_scope")
+    r_scope = row.get("residual_scope")
+    p_src = row.get("proxy_source")
+    scope_bits: list[str] = []
+    if isinstance(q_scope, str) and q_scope and q_scope != "none":
+        scope_bits.append(f'Quality: <b>{_escape(q_scope)}</b>')
+    if isinstance(v_scope, str) and v_scope and v_scope != "none":
+        scope_bits.append(f'Value: <b>{_escape(v_scope)}</b>')
+    if isinstance(r_scope, str) and r_scope and r_scope != "none":
+        if isinstance(p_src, str) and p_src and p_src != "none":
+            label = (
+                "sector ETF" if p_src == "sector_etf"
+                else "industry ETF" if p_src == "industry_etf"
+                else "internal LOO" if p_src == "internal_loo"
+                else _escape(p_src)
+            )
+            scope_bits.append(f'Residual: <b>{_escape(r_scope)}</b> ({label})')
+        else:
+            scope_bits.append(f'Residual: <b>{_escape(r_scope)}</b>')
+    scope_html = (
+        f'<div class="scope-row">{" · ".join(scope_bits)}</div>'
+        if scope_bits else ""
+    )
+
     diag = (diagnostics or {}).get(ticker) or {}
     chart_series = diag.get("chart_m6") or []
     current_m6 = diag.get("current_m6")
@@ -1442,6 +1500,7 @@ def _row_html(
         f'{full_name_block}'
         f'{diagnostics_block}'
         f'<div class="factors">{factor_rows}</div>'
+        f'{scope_html}'
         f'<div class="explain">{explanation}</div>'
         f'{weight_lines}'
         f'{expectations_block}'
@@ -2145,6 +2204,65 @@ def render(
     raw_count = factors_used.get("universe_raw_count")
     eligible_count = factors_used.get("universe_eligible_count")
     excluded_by_reason = factors_used.get("universe_excluded_by_reason") or {}
+
+    # Industry / sector normalisation audit. Quiet by default — describes
+    # the bucket hierarchy in plain language and shows how many tickers
+    # ended up in each tier.
+    norm = factors_used.get("normalization") or {}
+    norm_block = ""
+    if norm:
+        sc = norm.get("scope_counts") or {}
+        def _scope_line(label, key):
+            row = sc.get(key) or {}
+            if not row:
+                return ""
+            order = ("industry", "sector", "universe", "none")
+            bits = [
+                f'{k}={int(row[k])}' for k in order if row.get(k)
+            ]
+            return (
+                f'<p><b>{label}</b> · ' + ' · '.join(bits) + '</p>'
+                if bits else ""
+            )
+        scope_lines = (
+            _scope_line("Quality", "quality")
+            + _scope_line("Value", "value")
+            + _scope_line("Expectations", "expectations")
+        )
+        ind_top = norm.get("industry_top") or []
+        top_html = ""
+        if ind_top:
+            rows = "".join(
+                f'<tr><td>{_escape(name)}</td><td class="num">{int(n)}</td></tr>'
+                for name, n in ind_top
+            )
+            top_html = (
+                '<p>Largest industries (active set):</p>'
+                f'<table class="norm-table"><thead><tr>'
+                f'<th>Industry</th><th class="num">N</th></tr></thead>'
+                f'<tbody>{rows}</tbody></table>'
+            )
+        norm_block = (
+            '<h3>Normalisation hierarchy</h3>'
+            f'<p>Quality, Value, and Expectations factors are winsorised + '
+            f'cross-sectionally z-scored within the smallest peer group that '
+            f'meets a minimum size: '
+            f'<b>industry</b> if it has at least '
+            f'{int(norm.get("industry_min", 25))} active tickers; else '
+            f'<b>sector</b> if it has at least '
+            f'{int(norm.get("sector_min", 5))}; else <b>universe</b>-wide. '
+            f'Each ticker\'s scope is shown in its expanded card. '
+            f'This run has '
+            f'{int(norm.get("industry_buckets_eligible", 0))} of '
+            f'{int(norm.get("industry_buckets_total", 0))} industries eligible '
+            f'for industry-level z, and '
+            f'{int(norm.get("sector_buckets_eligible", 0))} of '
+            f'{int(norm.get("sector_buckets_total", 0))} sectors at '
+            f'sector-level minimum.</p>'
+            f'{scope_lines}'
+            f'{top_html}'
+        )
+
     counts_block = ""
     if raw_count is not None and eligible_count is not None:
         excluded_n = sum(len(v) for v in excluded_by_reason.values())
@@ -2177,7 +2295,7 @@ def render(
         '</div>'
         '</summary>'
         '<div class="section-body methodology-body">'
-        f'{counts_block}{_METHODOLOGY_BODY}{excluded_block}'
+        f'{counts_block}{_METHODOLOGY_BODY}{norm_block}{excluded_block}'
         '</div>'
         '</details>'
     )

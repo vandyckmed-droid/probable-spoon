@@ -109,6 +109,17 @@ def ticker_to_sector(profiles_data: dict) -> dict[str, str]:
     return {t: s for t, s in out.items() if t in valid}
 
 
+def ticker_to_industry(profiles_data: dict) -> dict[str, str]:
+    """Map each cached profile to its FMP industry string, defaulted to
+    'Unknown' when the profile is missing or the field is empty. Intended
+    for industry-level z-scoring; the caller filters to the active set."""
+    out: dict[str, str] = {}
+    for ticker, prof in (profiles_data or {}).items():
+        ind = (prof.get("industry") or "").strip()
+        out[ticker] = ind or "Unknown"
+    return out
+
+
 def add_to_universe_extras(tickers: list[str]) -> list[str]:
     """Append novel tickers to the extras file. Idempotent. Returns newly added."""
     cleaned: list[str] = []

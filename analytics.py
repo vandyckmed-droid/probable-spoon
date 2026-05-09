@@ -11,7 +11,7 @@ from config import (
     V_EBIT_EV_W, V_FCF_EV_W, V_BP_W,
     W_MOMENTUM, W_QUALITY, W_VALUE,
     QUALITY_FALLBACK_THRESHOLD, VALUE_FALLBACK_THRESHOLD,
-    MIN_SECTOR_SIZE,
+    INDUSTRY_MIN_SIZE, MIN_SECTOR_SIZE,
     EXP_GROWTH_W, EXP_SURPRISE_W,
 )
 
@@ -267,32 +267,113 @@ def compute_diagnostics(
 
 # ===== PART 3: quality & value =====
 
-def _winsor_zscore_within_sector(s: pd.Series, sectors: pd.Series) -> pd.Series:
-    """Within-sector winsorize+z when the sector has at least MIN_SECTOR_SIZE
-    finite members; otherwise fall back to a universe-wide z for those tickers.
-    Preserves NaN where the input itself is NaN.
+# Scope precedence for aggregating per-component scopes into a single
+# per-ticker scope label: industry > sector > universe > none.
+_SCOPE_RANK = {"industry": 3, "sector": 2, "universe": 1, "none": 0}
+_RANK_TO_SCOPE = {v: k for k, v in _SCOPE_RANK.items()}
+
+
+def _winsor_zscore_hierarchical(
+    s: pd.Series,
+    primary: pd.Series | None,
+    secondary: pd.Series,
+    primary_min: int = INDUSTRY_MIN_SIZE,
+    secondary_min: int = MIN_SECTOR_SIZE,
+) -> tuple[pd.Series, pd.Series]:
+    """Winsorize + cross-sectional z within a bucket hierarchy.
+
+    For each ticker:
+      1. If the primary bucket (industry) has ≥ primary_min finite members
+         in `s`, z-score within that bucket (winsorised first).
+      2. Else if the secondary bucket (sector) has ≥ secondary_min finite
+         members, z-score within sector.
+      3. Else fall back to a universe-wide winsor + z.
+
+    Empty / 'Unknown' bucket labels skip that tier. NaN inputs in `s` stay
+    NaN with scope='none'. Returns (z_series, scope_series); scope_series
+    values are one of 'industry', 'sector', 'universe', 'none'.
     """
     out = pd.Series(np.nan, index=s.index, dtype=float)
-    sec = sectors.reindex(s.index)
-    fallback_idx: list = []
-    for _, idx in sec.groupby(sec).groups.items():
-        group = s.loc[idx]
-        if group.dropna().shape[0] >= MIN_SECTOR_SIZE:
-            out.loc[idx] = _zscore(_winsorize(group))
-        else:
-            fallback_idx.extend(idx)
-    if fallback_idx:
+    scope = pd.Series("none", index=s.index, dtype=object)
+    if primary is None:
+        primary = pd.Series("Unknown", index=s.index)
+    primary = primary.reindex(s.index).fillna("Unknown").astype(str)
+    secondary = secondary.reindex(s.index).fillna("Unknown").astype(str)
+    assigned = pd.Series(False, index=s.index, dtype=bool)
+
+    # Tier 1: industry buckets large enough on their own.
+    for bucket, idx in primary.groupby(primary).groups.items():
+        if not bucket or bucket == "Unknown":
+            continue
+        group = s.loc[idx].dropna()
+        if len(group) >= primary_min:
+            z = _zscore(_winsorize(group))
+            out.loc[z.index] = z
+            scope.loc[z.index] = "industry"
+            assigned.loc[z.index] = True
+
+    # Tier 2: sector buckets for whatever didn't get industry-z'd.
+    pending = (~assigned) & s.notna()
+    if pending.any():
+        sec_pending = secondary[pending]
+        for bucket, idx in sec_pending.groupby(sec_pending).groups.items():
+            if not bucket or bucket == "Unknown":
+                continue
+            group = s.loc[idx].dropna()
+            if len(group) >= secondary_min:
+                z = _zscore(_winsorize(group))
+                out.loc[z.index] = z
+                scope.loc[z.index] = "sector"
+                assigned.loc[z.index] = True
+
+    # Tier 3: universe-wide winsor + z for everyone still pending with a
+    # finite value. Uses the full series so the reference distribution
+    # includes all observations, not just the leftover slice.
+    pending = (~assigned) & s.notna()
+    if pending.any():
         universe_z = _zscore(_winsorize(s))
-        out.loc[fallback_idx] = universe_z.loc[fallback_idx]
-    return out
+        out.loc[pending] = universe_z.loc[pending]
+        scope.loc[pending] = "universe"
+
+    return out, scope
+
+
+def _winsor_zscore_within_sector(s: pd.Series, sectors: pd.Series) -> pd.Series:
+    """Backwards-compatible sector-only wrapper (used by tests). New callers
+    should pass an industry bucket and use _winsor_zscore_hierarchical."""
+    z, _scope = _winsor_zscore_hierarchical(s, None, sectors)
+    return z
+
+
+def _aggregate_scope(scopes: list[pd.Series]) -> pd.Series:
+    """Per-ticker scope = highest tier observed across the supplied
+    component scopes (industry > sector > universe > none). Lets a single
+    "did we use industry-relative info anywhere for this ticker?" badge
+    represent a multi-component factor like quality or value.
+    """
+    if not scopes:
+        return pd.Series(dtype=object)
+    idx = scopes[0].index
+    rank_cols = []
+    for sc in scopes:
+        rank_cols.append(
+            sc.reindex(idx).fillna("none").map(_SCOPE_RANK).fillna(0).astype(int)
+        )
+    max_rank = pd.concat(rank_cols, axis=1).max(axis=1)
+    return max_rank.map(_RANK_TO_SCOPE).fillna("none")
 
 
 def compute_quality(
     funds: dict,
     ticker_sector: dict[str, str],
+    ticker_industry: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
-    """Sector-relative z on quality components, then a universe-wide z on
-    the weighted composite so quality_z is comparable to momentum_z."""
+    """Industry-then-sector-then-universe relative z on quality components,
+    plus a universe-wide z on the weighted composite so quality_z is
+    comparable to momentum_z. `ticker_industry` is optional for backwards
+    compatibility; when omitted the normaliser collapses to sector-then-
+    universe (the prior behaviour)."""
+    ti = ticker_industry or {}
     rows: dict[str, dict] = {}
     for ticker, data in funds.items():
         if ticker not in ticker_sector:
@@ -326,6 +407,7 @@ def compute_quality(
             continue
         rows[ticker] = {
             "sector": ticker_sector.get(ticker, "Unknown"),
+            "industry": ti.get(ticker, "Unknown"),
             "gross_profitability": gp_ratio,
             "gp_change": gp_change,
             "balance_sheet_quality": bsq,
@@ -333,10 +415,18 @@ def compute_quality(
     if not rows:
         return pd.DataFrame(), {"coverage": 0.0}
     df = pd.DataFrame.from_dict(rows, orient="index")
+    industries = df["industry"]
     sectors = df["sector"]
-    df["gp_z"] = _winsor_zscore_within_sector(df["gross_profitability"], sectors)
-    df["gp_change_z"] = _winsor_zscore_within_sector(df["gp_change"], sectors)
-    df["nd_z"] = _winsor_zscore_within_sector(df["balance_sheet_quality"], sectors)
+    df["gp_z"], gp_scope = _winsor_zscore_hierarchical(
+        df["gross_profitability"], industries, sectors,
+    )
+    df["gp_change_z"], gpc_scope = _winsor_zscore_hierarchical(
+        df["gp_change"], industries, sectors,
+    )
+    df["nd_z"], nd_scope = _winsor_zscore_hierarchical(
+        df["balance_sheet_quality"], industries, sectors,
+    )
+    df["quality_scope"] = _aggregate_scope([gp_scope, gpc_scope, nd_scope])
     df["quality_raw"] = (
         Q_GP_W * df["gp_z"].fillna(0)
         + Q_GP_CHANGE_W * df["gp_change_z"].fillna(0)
@@ -344,8 +434,10 @@ def compute_quality(
     )
     df["quality_z"] = _zscore(_winsorize(df["quality_raw"]))
     coverage = df["quality_z"].notna().sum() / len(funds) if funds else 0.0
-    cols = ["sector", "gross_profitability", "gp_change", "balance_sheet_quality",
-            "gp_z", "gp_change_z", "nd_z", "quality_raw", "quality_z"]
+    cols = ["sector", "industry",
+            "gross_profitability", "gp_change", "balance_sheet_quality",
+            "gp_z", "gp_change_z", "nd_z", "quality_scope",
+            "quality_raw", "quality_z"]
     return df[cols], {"coverage": float(coverage)}
 
 
@@ -353,9 +445,13 @@ def compute_value(
     funds: dict,
     prices: pd.DataFrame,
     ticker_sector: dict[str, str],
+    ticker_industry: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
-    """Sector-relative z on value components, then a universe-wide z on
-    the weighted composite so value_z is comparable to momentum_z."""
+    """Industry-then-sector-then-universe relative z on value components,
+    plus a universe-wide z on the weighted composite so value_z is
+    comparable to momentum_z. `ticker_industry` is optional for backwards
+    compatibility."""
+    ti = ticker_industry or {}
     rows: dict[str, dict] = {}
     for ticker, data in funds.items():
         if ticker not in ticker_sector:
@@ -393,16 +489,25 @@ def compute_value(
         book_mc = (equity / market_cap) if equity is not None else float("nan")
         rows[ticker] = {
             "sector": ticker_sector.get(ticker, "Unknown"),
+            "industry": ti.get(ticker, "Unknown"),
             "market_cap": market_cap,
             "ebit_ev": ebit_ev, "fcf_ev": fcf_ev, "book_mc": book_mc,
         }
     if not rows:
         return pd.DataFrame(), {"coverage": 0.0}
     df = pd.DataFrame.from_dict(rows, orient="index")
+    industries = df["industry"]
     sectors = df["sector"]
-    df["ebit_ev_z"] = _winsor_zscore_within_sector(df["ebit_ev"], sectors)
-    df["fcf_ev_z"] = _winsor_zscore_within_sector(df["fcf_ev"], sectors)
-    df["book_mc_z"] = _winsor_zscore_within_sector(df["book_mc"], sectors)
+    df["ebit_ev_z"], ee_scope = _winsor_zscore_hierarchical(
+        df["ebit_ev"], industries, sectors,
+    )
+    df["fcf_ev_z"], fe_scope = _winsor_zscore_hierarchical(
+        df["fcf_ev"], industries, sectors,
+    )
+    df["book_mc_z"], bm_scope = _winsor_zscore_hierarchical(
+        df["book_mc"], industries, sectors,
+    )
+    df["value_scope"] = _aggregate_scope([ee_scope, fe_scope, bm_scope])
     df["value_raw"] = (
         V_EBIT_EV_W * df["ebit_ev_z"].fillna(0)
         + V_FCF_EV_W * df["fcf_ev_z"].fillna(0)
@@ -410,14 +515,17 @@ def compute_value(
     )
     df["value_z"] = _zscore(_winsorize(df["value_raw"]))
     coverage = df["value_z"].notna().sum() / len(funds) if funds else 0.0
-    cols = ["sector", "market_cap", "ebit_ev", "fcf_ev", "book_mc",
-            "ebit_ev_z", "fcf_ev_z", "book_mc_z", "value_raw", "value_z"]
+    cols = ["sector", "industry", "market_cap",
+            "ebit_ev", "fcf_ev", "book_mc",
+            "ebit_ev_z", "fcf_ev_z", "book_mc_z", "value_scope",
+            "value_raw", "value_z"]
     return df[cols], {"coverage": float(coverage)}
 
 
 def compute_expectations(
     revisions_data: dict,
     ticker_sector: dict[str, str],
+    ticker_industry: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Diagnostic Expectations score from analyst estimates + earnings surprises.
 
@@ -437,6 +545,7 @@ def compute_expectations(
         expectations_raw, expectations_z
     meta = {"coverage": fraction_of_input_tickers_with_finite_z}.
     """
+    ti = ticker_industry or {}
     rows: dict[str, dict] = {}
     for ticker, data in revisions_data.items():
         if ticker not in ticker_sector:
@@ -474,6 +583,7 @@ def compute_expectations(
             continue
         rows[ticker] = {
             "sector": ticker_sector.get(ticker, "Unknown"),
+            "industry": ti.get(ticker, "Unknown"),
             "growth": growth,
             "surprise": surprise,
         }
@@ -481,9 +591,15 @@ def compute_expectations(
     if not rows:
         return pd.DataFrame(), {"coverage": 0.0}
     df = pd.DataFrame.from_dict(rows, orient="index")
+    industries = df["industry"]
     sectors = df["sector"]
-    df["growth_z"] = _winsor_zscore_within_sector(df["growth"], sectors)
-    df["surprise_z"] = _winsor_zscore_within_sector(df["surprise"], sectors)
+    df["growth_z"], gr_scope = _winsor_zscore_hierarchical(
+        df["growth"], industries, sectors,
+    )
+    df["surprise_z"], su_scope = _winsor_zscore_hierarchical(
+        df["surprise"], industries, sectors,
+    )
+    df["expectations_scope"] = _aggregate_scope([gr_scope, su_scope])
     df["expectations_raw"] = (
         EXP_GROWTH_W * df["growth_z"].fillna(0)
         + EXP_SURPRISE_W * df["surprise_z"].fillna(0)
@@ -507,12 +623,12 @@ _FACTOR_COL = {
 }
 
 _FINAL_COLS = [
-    "sector", "market_cap",
+    "sector", "industry", "market_cap",
     "m12_raw", "m6_raw", "m1_raw", "m12_z", "m6_z", "m1_z", "residual_momentum_z",
     "gross_profitability", "gp_change", "balance_sheet_quality",
-    "gp_z", "gp_change_z", "nd_z", "quality_raw", "quality_z",
+    "gp_z", "gp_change_z", "nd_z", "quality_scope", "quality_raw", "quality_z",
     "ebit_ev", "fcf_ev", "book_mc", "ebit_ev_z", "fcf_ev_z", "book_mc_z",
-    "value_raw", "value_z",
+    "value_scope", "value_raw", "value_z",
     "composite", "rank", "sector_rank",
 ]
 
@@ -522,18 +638,23 @@ def build_ranked(
     qual_df: pd.DataFrame,
     val_df: pd.DataFrame,
     ticker_sector: dict[str, str],
+    ticker_industry: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Outer-join factor frames, apply coverage fallback, compute composite/rank."""
     parts = []
     for d in (mom_df, qual_df, val_df):
         if d is not None and not d.empty:
-            parts.append(d.drop(columns=["sector"], errors="ignore"))
+            parts.append(d.drop(columns=["sector", "industry"], errors="ignore"))
     df = pd.concat(parts, axis=1, join="outer") if parts else pd.DataFrame()
     if df.empty:
         return df, {"weights": {}, "quality": False, "value": False}
 
     df["sector"] = pd.Series(
         {t: ticker_sector.get(t, "Unknown") for t in df.index}
+    )
+    ti = ticker_industry or {}
+    df["industry"] = pd.Series(
+        {t: ti.get(t, "Unknown") for t in df.index}
     )
 
     n = len(df)

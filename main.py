@@ -22,7 +22,7 @@ from config import (
 )
 from universe import (
     classify_universe, exclusion_reason_label,
-    load_sector_etf_map, ticker_to_sector,
+    load_sector_etf_map, ticker_to_industry, ticker_to_sector,
 )
 
 
@@ -276,9 +276,12 @@ def main():
         )
 
     ts = ticker_to_sector(profiles_data)
-    # Restrict the sector map to eligible tickers so the pipeline never
+    ti = ticker_to_industry(profiles_data)
+    # Restrict both maps to eligible tickers so the pipeline never
     # processes anything we just filtered out.
-    ts = {t: s for t, s in ts.items() if t in set(tickers)}
+    active_set = set(tickers)
+    ts = {t: s for t, s in ts.items() if t in active_set}
+    ti = {t: i for t, i in ti.items() if t in active_set}
 
     prices_df, _ = store.prices()
     funds = store.fundamentals()
@@ -288,15 +291,17 @@ def main():
         returns, sec_resid, ts,
     )
     mom_df = analytics.compute_residual_momentum(stock_resid, ts)
-    qual_df, _ = analytics.compute_quality(funds, ts)
-    val_df, _ = analytics.compute_value(funds, prices_df, ts)
-    ranked, factors_used = analytics.build_ranked(mom_df, qual_df, val_df, ts)
+    qual_df, _ = analytics.compute_quality(funds, ts, ti)
+    val_df, _ = analytics.compute_value(funds, prices_df, ts, ti)
+    ranked, factors_used = analytics.build_ranked(mom_df, qual_df, val_df, ts, ti)
 
     # Diagnostic Expectations factor (step 1) — NOT in composite. Attaches as
     # a separate column the report surfaces in each card's expanded panel.
     if EXPECTATIONS_ENABLED:
         revisions_data = store.revisions()
-        exp_df, exp_meta = analytics.compute_expectations(revisions_data, ts)
+        exp_df, exp_meta = analytics.compute_expectations(revisions_data, ts, ti)
+        if not exp_df.empty and "expectations_scope" in exp_df.columns:
+            ranked["expectations_scope"] = ranked.index.map(exp_df["expectations_scope"])
         if not exp_df.empty:
             ranked["expectations_z"] = ranked.index.map(exp_df["expectations_z"])
         else:
@@ -385,6 +390,58 @@ def main():
         "hrp":   weights_mod.backtest_portfolio(returns, hrp_w, BACKTEST_DAYS),
         "market": weights_mod.backtest_market(returns, MARKET_TICKER, BACKTEST_DAYS),
     }
+    # Per-ticker residualisation labels. v1 exposes the structure; today every
+    # active ticker is sector-residualised against an ETF proxy. v3 will fan
+    # this out to industry-ETF / internal-LOO / sector-ETF / none as the
+    # pipeline gains industry residuals.
+    if "industry" in ranked.columns:
+        residual_scope = pd.Series("none", index=ranked.index, dtype=object)
+        proxy_source = pd.Series("none", index=ranked.index, dtype=object)
+        # If compute_stock_residuals produced a column for the ticker, it ran
+        # against [market, sector_etf_residual]. Otherwise residualisation
+        # was skipped (insufficient data, missing sector ETF, etc.).
+        residualised = set(stock_resid.columns) if not stock_resid.empty else set()
+        sector_for_t = ts
+        for t in ranked.index:
+            if t in residualised:
+                residual_scope.loc[t] = "sector"
+                proxy_source.loc[t] = (
+                    "sector_etf" if sector_for_t.get(t) in sector_etf_map else "none"
+                )
+        ranked["residual_scope"] = residual_scope
+        ranked["proxy_source"] = proxy_source
+
+    # Bucket-count audit for the methodology / universe drawer. Counts only
+    # use the active set so the numbers match what was actually scored.
+    if "industry" in ranked.columns:
+        ind_counts = ranked["industry"].value_counts()
+        sec_counts = ranked["sector"].value_counts()
+        ind_eligible = int((ind_counts >= 25).sum())
+        ind_total = int((ind_counts.index != "Unknown").sum())
+        sec_eligible = int((sec_counts >= 5).sum())
+        sec_total = int((sec_counts.index != "Unknown").sum())
+        scope_counts: dict[str, dict] = {"quality": {}, "value": {}, "expectations": {}}
+        for col, key in (
+            ("quality_scope", "quality"),
+            ("value_scope", "value"),
+            ("expectations_scope", "expectations"),
+        ):
+            if col in ranked.columns:
+                vc = ranked[col].fillna("none").value_counts()
+                scope_counts[key] = {str(k): int(v) for k, v in vc.items()}
+        factors_used["normalization"] = {
+            "industry_min": 25,
+            "sector_min": 5,
+            "industry_buckets_total": ind_total,
+            "industry_buckets_eligible": ind_eligible,
+            "sector_buckets_total": sec_total,
+            "sector_buckets_eligible": sec_eligible,
+            "scope_counts": scope_counts,
+            "industry_top": [
+                (str(k), int(v)) for k, v in ind_counts.head(15).items()
+            ],
+        }
+
     factors_used["sort"] = args.sort
     factors_used["universe_total"] = len(ranked)
     factors_used["universe_raw_count"] = len(raw_tickers)
