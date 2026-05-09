@@ -33,9 +33,20 @@ def _slug(s: str) -> str:
     return "".join(c if c.isalnum() or c in ("-", "_", ".") else "-" for c in s)
 
 
-def _timestamp() -> str:
-    """ISO-ish timestamp safe for filesystem paths."""
-    return dt.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+def _today_stamp() -> str:
+    """Date-only stamp used in snapshot directory names. One snapshot per day:
+    same-day re-runs overwrite the day's directory in place, preserving the
+    archive as a once-a-day point-in-time series rather than a per-run log."""
+    return dt.date.today().strftime("%Y-%m-%d")
+
+
+# Files we manage inside a snapshot directory. Removed before each write so
+# a stale artefact from a previous run does not survive when the new run
+# does not produce that file (e.g., empty ranked → no portfolio.csv).
+_SNAPSHOT_FILES = (
+    "metadata.json", "config.json",
+    "universe.csv", "ranked.csv", "portfolio.csv",
+)
 
 
 def _config_snapshot() -> dict:
@@ -185,10 +196,21 @@ def save_snapshot(
     try:
         version = _slug(getattr(config, "MQV_VERSION", "unknown"))
         strategy = _slug(getattr(config, "MQV_STRATEGY_NAME", "mqv"))
-        ts = _timestamp()
+        ts = _today_stamp()
         root = Path(getattr(config, "SNAPSHOTS_DIR", "snapshots"))
         snap_dir = root / f"{ts}_{strategy}_v{version}"
         snap_dir.mkdir(parents=True, exist_ok=True)
+        # Same-day re-run: clear our managed files so a previous run's
+        # artefact does not survive when the new run does not regenerate
+        # it. We only touch the known snapshot files — anything else the
+        # user might drop in the directory is left alone.
+        for fname in _SNAPSHOT_FILES:
+            fp = snap_dir / fname
+            if fp.exists():
+                try:
+                    fp.unlink()
+                except OSError:
+                    pass
 
         meta = _build_metadata(factors_used, top_n, prices_as_of, warnings_list)
         cfg = _config_snapshot()
