@@ -5,7 +5,7 @@ from config import (
     MOMENTUM_MIN_OBS, MARKET_TICKER, BETA_LOOKBACK_DAYS,
     MOM_SKIP_DAYS, MOM_LONG_DAYS, MOM_SHORT_DAYS, MOM_REV_DAYS,
     MOM_W_12_1, MOM_W_6_1,
-    SIGMA_DAYS, SIGMA_FLOOR,
+    SIGMA_DAYS, SIGMA_FLOOR, CHART_EMA_SPAN,
     WINSOR_LOWER, WINSOR_UPPER,
     Q_GP_W, Q_GP_CHANGE_W, Q_NETDEBT_W,
     V_EBIT_EV_W, V_FCF_EV_W, V_BP_W,
@@ -202,6 +202,7 @@ def compute_diagnostics(
     out: dict = {}
     if stock_residuals is None or stock_residuals.empty:
         return out
+    ema_span = max(1, int(CHART_EMA_SPAN))
     for t in tickers:
         if t not in stock_residuals.columns:
             continue
@@ -211,7 +212,17 @@ def compute_diagnostics(
         rolling = s.rolling(SIGMA_DAYS).sum().dropna()
         if rolling.empty:
             continue
-        chart = rolling.tail(chart_lookback)
+        # Very gentle EMA on the chart series so day-to-day noise does not
+        # zigzag a chart that is meant to read as longer-horizon strength.
+        # The readouts (current 63d, sigma reading) follow the smoothed line
+        # so the chart's endpoint and the headline number stay in sync; the
+        # pullback z below stays raw because it is explicitly a short-term
+        # timing aid.
+        if ema_span > 1:
+            chart_full = rolling.ewm(span=ema_span, adjust=False).mean()
+        else:
+            chart_full = rolling
+        chart = chart_full.tail(chart_lookback)
         current_63d = float(chart.iloc[-1])
         sigma_daily = max(float(s.tail(SIGMA_DAYS).std(ddof=0)), SIGMA_FLOOR)
         sigma_reading = current_63d / (sigma_daily * float(np.sqrt(SIGMA_DAYS)))
@@ -224,6 +235,7 @@ def compute_diagnostics(
             "current_63d": current_63d,
             "sigma_reading": float(sigma_reading) if np.isfinite(sigma_reading) else 0.0,
             "pullback_z": float(pullback_z) if np.isfinite(pullback_z) else 0.0,
+            "ema_span": ema_span,
         }
     return out
 

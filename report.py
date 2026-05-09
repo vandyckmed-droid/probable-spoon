@@ -485,6 +485,15 @@ svg.resid-chart {
   margin: 6px 0 0;
   font-size: 11px; color: var(--text-faint);
 }
+/* Smoothing tag — low in the visual hierarchy on purpose. */
+.resid-ema {
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  letter-spacing: 0;
+  opacity: 0.65;
+  margin-left: 2px;
+}
 
 /* 21D Pullback indicator */
 .pullback-block {
@@ -1338,7 +1347,12 @@ def _row_html(
                 f'{svg}'
                 '</div>'
                 '<p class="resid-desc">Rolling 63-day cumulative residual '
-                'return after market removal.</p>'
+                'return after market removal.'
+                + (
+                    f' <span class="resid-ema">· EMA({int(diag.get("ema_span") or 1)})</span>'
+                    if int(diag.get("ema_span") or 1) > 1 else ''
+                )
+                + '</p>'
                 '</div>'
             )
         else:

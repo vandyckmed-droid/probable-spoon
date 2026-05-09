@@ -20,6 +20,7 @@ MOM_SHORT_DAYS       = 126       # 6-1
 MOM_REV_DAYS         = 21        # 1m reversal (diagnostic)
 SIGMA_DAYS           = 63        # current residual-sigma window
 SIGMA_FLOOR          = 1e-6      # volatility floor
+CHART_EMA_SPAN       = 5         # gentle EMA smoothing for the 63d residual chart; 1 disables
 TRADING_DAYS_PER_YEAR= 252
 
 # Winsorisation
