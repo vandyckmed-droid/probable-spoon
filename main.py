@@ -11,6 +11,7 @@ warnings.filterwarnings("ignore", message=".*quick_look.*", category=Deprecation
 import pandas as pd
 
 import analytics
+import data_health
 import report
 import snapshots
 import store
@@ -441,6 +442,27 @@ def main():
                 (str(k), int(v)) for k, v in ind_counts.head(15).items()
             ],
         }
+
+    # Per-ticker missing-data audit. Walks every active ticker against
+    # profiles, prices, fundamentals, residuals, and the ranked frame to
+    # emit a structured issue list grouped by category. The renderer
+    # surfaces this in a Data Integrity drawer.
+    factors_used["data_health"] = data_health.audit(
+        active_tickers=tickers,
+        profiles_data=profiles_data,
+        funds_data=funds,
+        prices_df=prices_df,
+        stock_resid_columns=set(stock_resid.columns) if not stock_resid.empty else set(),
+        ranked=ranked,
+        sector_etf_map=sector_etf_map,
+    )
+    dh = factors_used["data_health"]
+    if dh["n_with_issues"]:
+        print(
+            f"Data integrity: {dh['n_with_issues']} of {dh['n_active']} "
+            f"active tickers have data issues "
+            f"({sum(dh['by_category'].values())} total findings)"
+        )
 
     factors_used["sort"] = args.sort
     factors_used["universe_total"] = len(ranked)

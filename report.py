@@ -682,6 +682,97 @@ svg.resid-chart {
   font-variant-numeric: tabular-nums;
   color: var(--text-strong);
 }
+
+/* Data integrity drawer */
+.dh-muted { color: var(--text-muted); font-size: 13px; }
+.dh-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.dh-pill-block {
+  color: var(--accent-down);
+  border: 1px solid var(--accent-down);
+}
+.dh-cat {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+.dh-cat > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.dh-cat > summary::-webkit-details-marker { display: none; }
+.dh-cat-label {
+  color: var(--text-strong);
+  font-weight: 600;
+  font-size: 14px;
+}
+.dh-cat.sev-block .dh-cat-label { color: var(--accent-down); }
+.dh-cat.sev-fallback .dh-cat-label { color: var(--accent-up); opacity: 0.85; }
+.dh-cat-count {
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.dh-cat-body {
+  border-top: 1px solid var(--line);
+  padding: 4px 12px 10px;
+}
+.dh-row {
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.dh-row:last-child { border-bottom: none; }
+.dh-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+}
+.dh-tk {
+  font-family: var(--tabular);
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.dh-name {
+  color: var(--text-muted);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.dh-detail {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text);
+}
+.dh-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+.dh-meta-k {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  margin-right: 2px;
+}
 .uni-row {
   display: contents;
 }
@@ -1909,6 +2000,138 @@ def _universe_section_html(factors_used: dict) -> str:
     )
 
 
+def _data_health_section_html(factors_used: dict, names: dict) -> str:
+    """Build the Data Integrity card.
+
+    Top-level: how many active tickers have any issue. Body groups issues
+    by category (worst severity first), each category collapses by default
+    and expands to a per-ticker list with detail / source / action /
+    last-refresh fields. Mobile-friendly nested <details>.
+    """
+    dh = factors_used.get("data_health") or {}
+    if not dh or not dh.get("by_ticker"):
+        # Always render the section so the user has somewhere to confirm
+        # data integrity even on a clean run.
+        n_active = dh.get("n_active") or factors_used.get("universe_active_count") or 0
+        return (
+            '<details class="section">'
+            '<summary>'
+            '<div class="section-head">'
+            '<div class="section-title">Data integrity</div>'
+            '<div class="section-subtitle">'
+            f'{n_active} active tickers · no issues found'
+            '</div>'
+            '</div>'
+            '</summary>'
+            '<div class="section-body">'
+            '<p class="dh-muted">Profiles, prices, fundamentals, residuals '
+            'and factors all populated for the active set.</p>'
+            '</div>'
+            '</details>'
+        )
+
+    n_active = dh.get("n_active", 0)
+    n_with = dh.get("n_with_issues", 0)
+    by_cat = dh.get("by_category") or {}
+    by_t = dh.get("by_ticker") or {}
+    cats = dh.get("categories") or []
+
+    severity_class = {0: "block", 1: "fallback", 2: "stale", 3: "info"}
+
+    # Build per-category drawers, sorted by severity then count.
+    cat_blocks: list[str] = []
+    cats_sorted = sorted(cats, key=lambda c: (c[2], -by_cat.get(c[0], 0), c[1]))
+    for cat_id, cat_label, sev in cats_sorted:
+        # Collect (ticker, issue) pairs for this category.
+        rows: list[tuple[str, dict]] = []
+        for t, issues in by_t.items():
+            for iss in issues:
+                if iss.get("category") == cat_id:
+                    rows.append((t, iss))
+        if not rows:
+            continue
+        rows.sort(key=lambda r: r[0])
+        ticker_lines = []
+        for t, iss in rows:
+            name = (names.get(t) or "").strip()
+            name_html = f' <span class="dh-name">{_escape(name)}</span>' if name else ""
+            detail = iss.get("detail") or ""
+            calc = iss.get("calc") or ""
+            source = iss.get("source") or ""
+            action = iss.get("action") or ""
+            refresh = iss.get("last_refresh") or ""
+            meta_bits = []
+            if calc:
+                meta_bits.append(f'<span class="dh-meta-k">calc</span> {_escape(calc)}')
+            if source:
+                meta_bits.append(f'<span class="dh-meta-k">source</span> {_escape(source)}')
+            if action:
+                meta_bits.append(f'<span class="dh-meta-k">action</span> {_escape(action)}')
+            if refresh:
+                meta_bits.append(f'<span class="dh-meta-k">last refresh</span> {_escape(refresh)}')
+            meta_html = (
+                f'<div class="dh-meta">{" · ".join(meta_bits)}</div>'
+                if meta_bits else ""
+            )
+            ticker_lines.append(
+                '<div class="dh-row">'
+                f'<div class="dh-row-head"><span class="dh-tk">{_escape(t)}</span>'
+                f'{name_html}</div>'
+                f'<div class="dh-detail">{_escape(detail)}</div>'
+                f'{meta_html}'
+                '</div>'
+            )
+        cat_blocks.append(
+            f'<details class="dh-cat sev-{severity_class.get(sev, "info")}">'
+            '<summary>'
+            f'<span class="dh-cat-label">{_escape(cat_label)}</span>'
+            f'<span class="dh-cat-count">{len(rows)}</span>'
+            '</summary>'
+            f'<div class="dh-cat-body">{"".join(ticker_lines)}</div>'
+            '</details>'
+        )
+
+    summary_pct = (n_with / n_active * 100.0) if n_active else 0.0
+    severity_summary = ""
+    blocking = sum(by_cat.get(c[0], 0) for c in CATEGORIES_BLOCK)
+    if blocking:
+        severity_summary = (
+            f'<span class="dh-pill dh-pill-block">{blocking} blocking</span>'
+        )
+
+    return (
+        '<details class="section">'
+        '<summary>'
+        '<div class="section-head">'
+        '<div class="section-title">Data integrity</div>'
+        '<div class="section-subtitle">'
+        f'{n_with} of {n_active} active tickers have data issues '
+        f'({summary_pct:.0f}%) · {sum(by_cat.values())} findings'
+        f'{(" · " + severity_summary) if severity_summary else ""}'
+        '</div>'
+        '</div>'
+        '</summary>'
+        '<div class="section-body">'
+        '<p class="dh-muted">Tickers grouped by issue category. '
+        'Categories are sorted by severity. <b>Blocking</b> means a '
+        'calculation could not run; <b>fallback</b> means a less-precise '
+        'tier was used; <b>stale</b> / <b>info</b> are advisory.</p>'
+        f'{"".join(cat_blocks)}'
+        '</div>'
+        '</details>'
+    )
+
+
+# Stable list of categories we treat as "blocking" for the section
+# subtitle pill. Mirrors data_health.CATEGORIES severity 0.
+CATEGORIES_BLOCK = (
+    ("missing_profile",),
+    ("missing_prices",),
+    ("missing_fundamentals",),
+    ("residual_skipped",),
+)
+
+
 def _backtest_section_html(bt: dict) -> str:
     lookback = bt.get("lookback_days") or 0
     eq = bt.get("equal")
@@ -2200,6 +2423,7 @@ def render(
 
     backtest_section = _backtest_section_html(factors_used.get("backtest") or {})
     universe_section = _universe_section_html(factors_used)
+    data_health_section = _data_health_section_html(factors_used, names)
 
     raw_count = factors_used.get("universe_raw_count")
     eligible_count = factors_used.get("universe_eligible_count")
@@ -2340,6 +2564,7 @@ def render(
         '</div>'
         f'{full_section}'
         f'{universe_section}'
+        f'{data_health_section}'
         f'{backtest_section}'
         f'{methodology_section}'
         f'{_snapshot_archive_html()}'
