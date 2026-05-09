@@ -272,7 +272,9 @@ def main():
     funds = store.fundamentals()
     returns = analytics.log_returns(prices_df)
     sec_resid = analytics.compute_sector_residuals(returns, sector_etf_map)
-    stock_resid, _, _ = analytics.compute_stock_residuals(returns, sec_resid, ts)
+    stock_resid, betas_market, betas_sector = analytics.compute_stock_residuals(
+        returns, sec_resid, ts,
+    )
     mom_df = analytics.compute_residual_momentum(stock_resid, ts)
     qual_df, _ = analytics.compute_quality(funds, ts)
     val_df, _ = analytics.compute_value(funds, prices_df, ts)
@@ -305,14 +307,19 @@ def main():
     top_n = min(TOP_N, len(ranked))
     top_tickers = ranked.head(top_n).index.tolist()
 
-    # 21-day price snapshots for every visible card (mini sparkline in the
-    # collapsed row, larger one in the expanded drawer).
-    sparklines: dict[str, list[float]] = {}
-    for t in ranked.index[:200]:
-        if t in prices_df.columns:
-            s = prices_df[t].dropna().tail(21)
-            if len(s) >= 5:
-                sparklines[t] = [float(x) for x in s.tolist()]
+    # Surface the per-ticker betas (already estimated by compute_stock_residuals)
+    # so they ride along in ranked.csv and into the snapshot archive for later
+    # diagnostic / forward-test use.
+    if betas_market:
+        ranked["beta_market"] = ranked.index.map(betas_market)
+    if betas_sector:
+        ranked["beta_sector"] = ranked.index.map(betas_sector)
+
+    # Diagnostic series for each visible card: rolling 63-day residual return
+    # chart, current 63d value, sigma reading, and 21d pullback z. Replaces
+    # the older 21-day price sparkline.
+    diagnostic_tickers = list(ranked.index[:200])
+    diagnostics = analytics.compute_diagnostics(stock_resid, diagnostic_tickers)
 
     # Three weighting schemes for the toggle. HRP runs on residual returns
     # (market- and sector-orthogonalised); equal and inverse_vol run on raw
@@ -412,7 +419,7 @@ def main():
     names = store.company_names(display_ranked.index.tolist())
     html = report.render(
         display_ranked, names, factors_used,
-        sparklines=sparklines,
+        diagnostics=diagnostics,
     )
     report_path = (out_dir / "report.html").resolve()
     report.write_report(html, str(report_path))

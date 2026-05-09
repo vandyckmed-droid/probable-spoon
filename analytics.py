@@ -178,6 +178,56 @@ def compute_residual_momentum(
     ]
 
 
+def compute_diagnostics(
+    stock_residuals: pd.DataFrame,
+    tickers: list[str],
+    chart_lookback: int = 252,
+) -> dict:
+    """Per-ticker residual diagnostics for the expanded card.
+
+    Returns a dict keyed by ticker with:
+        chart_63d:     [floats], rolling 63-day cumulative residual
+                        return over the last `chart_lookback` trading days
+                        (display series for the residual chart).
+        current_63d:   float, the most recent 63-day cumulative residual
+                        (last value of chart_63d).
+        sigma_reading: float, current_63d divided by (sigma_daily * sqrt(63));
+                        a sigma-style read of "how unusual is this 63d move".
+        pullback_z:    float, last 21d cumulative residual divided by
+                        (sigma_daily * sqrt(21)) — short-term timing aid.
+
+    sigma_daily is the stdev of the most recent 63 daily residuals (with the
+    same SIGMA_FLOOR safeguard used in compute_residual_momentum).
+    """
+    out: dict = {}
+    if stock_residuals is None or stock_residuals.empty:
+        return out
+    for t in tickers:
+        if t not in stock_residuals.columns:
+            continue
+        s = stock_residuals[t].dropna()
+        if len(s) < SIGMA_DAYS:
+            continue
+        rolling = s.rolling(SIGMA_DAYS).sum().dropna()
+        if rolling.empty:
+            continue
+        chart = rolling.tail(chart_lookback)
+        current_63d = float(chart.iloc[-1])
+        sigma_daily = max(float(s.tail(SIGMA_DAYS).std(ddof=0)), SIGMA_FLOOR)
+        sigma_reading = current_63d / (sigma_daily * float(np.sqrt(SIGMA_DAYS)))
+        pullback_z = float("nan")
+        if len(s) >= MOM_REV_DAYS:
+            recent_21 = float(s.tail(MOM_REV_DAYS).sum())
+            pullback_z = recent_21 / (sigma_daily * float(np.sqrt(MOM_REV_DAYS)))
+        out[t] = {
+            "chart_63d": [float(x) for x in chart.tolist()],
+            "current_63d": current_63d,
+            "sigma_reading": float(sigma_reading) if np.isfinite(sigma_reading) else 0.0,
+            "pullback_z": float(pullback_z) if np.isfinite(pullback_z) else 0.0,
+        }
+    return out
+
+
 # ===== PART 3: quality & value =====
 
 def _winsor_zscore_within_sector(s: pd.Series, sectors: pd.Series) -> pd.Series:

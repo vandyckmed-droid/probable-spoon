@@ -360,12 +360,22 @@ details.row > summary::marker { display: none; }
 .mini-spark-cell {
   grid-row: 1 / span 2; grid-column: 3;
   align-self: center; justify-self: center;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1px;
 }
 svg.mini-spark {
   display: block;
   width: 56px; height: 22px;
-  opacity: 0.85;
+  opacity: 0.9;
 }
+.mini-pct {
+  font-family: var(--tabular);
+  font-size: 10px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.mini-pct.up   { color: var(--accent-up); }
+.mini-pct.down { color: var(--accent-down); }
 
 .meta {
   grid-row: 2; grid-column: 2;
@@ -403,30 +413,147 @@ svg.mini-spark {
   margin: 0 0 14px;
 }
 
-/* Drawer sparkline — large, soft gradient fill */
-.sparkline-row { margin: 8px 0 18px; }
-.sparkline-cap {
+/* Drawer residual-return chart + 21d pullback indicator */
+.resid-block {
+  margin: 6px 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px 8px;
+  background: rgba(255,255,255,0.015);
+}
+.resid-head {
   display: flex; justify-content: space-between; align-items: baseline;
   margin-bottom: 8px;
 }
-.sparkline-label {
+.resid-title { display: flex; align-items: baseline; gap: 6px; }
+.resid-label {
   font-size: 10px; font-weight: 600;
   color: var(--text-faint);
   text-transform: uppercase; letter-spacing: 0.12em;
 }
-.sparkline-pct {
+.resid-axis {
+  font-size: 10px; color: var(--text-faint);
+}
+.resid-readout {
+  display: flex; align-items: baseline; gap: 6px;
   font-family: var(--tabular);
-  font-size: 16px; font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+.resid-value {
+  font-size: 16px; font-weight: 700;
   letter-spacing: -0.01em;
 }
-.sparkline-pct.up   { color: var(--accent-up); }
-.sparkline-pct.down { color: var(--accent-down); }
-svg.sparkline {
-  display: block;
-  width: 100%; height: 64px;
+.resid-sigma { font-size: 11px; }
+.resid-value.up,  .resid-sigma.up   { color: var(--accent-up); }
+.resid-value.down, .resid-sigma.down { color: var(--accent-down); }
+
+.resid-chart-wrap {
+  position: relative;
+  height: 110px;
   color: var(--text-faint);
 }
+svg.resid-chart {
+  display: block;
+  width: 100%; height: 100%;
+}
+.resid-axis-tl, .resid-axis-tr,
+.resid-axis-bl, .resid-axis-br,
+.resid-axis-zero {
+  position: absolute;
+  font-family: var(--tabular);
+  font-size: 10px;
+  color: var(--text-faint);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.resid-axis-tl { top: 2px; left: 2px; }
+.resid-axis-tr { top: 2px; right: 2px; }
+.resid-axis-bl { bottom: 2px; left: 2px; }
+.resid-axis-br { bottom: 2px; right: 2px; }
+.resid-axis-zero {
+  top: calc(50% - 7px);
+  left: 2px;
+  opacity: 0.5;
+}
+.resid-desc {
+  margin: 6px 0 0;
+  font-size: 11px; color: var(--text-faint);
+}
+
+/* 21D Pullback indicator */
+.pullback-block {
+  margin: 0 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.015);
+}
+.pullback-head {
+  display: flex; justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+.pullback-title { display: flex; align-items: baseline; gap: 6px; }
+.pullback-label {
+  font-size: 10px; font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.12em;
+}
+.pullback-axis { font-size: 10px; color: var(--text-faint); }
+.pullback-readout {
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: 1px;
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+}
+.pullback-z {
+  font-size: 14px; font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.pullback-z.up   { color: var(--accent-up); }
+.pullback-z.down { color: var(--accent-down); }
+.pullback-status {
+  font-size: 11px; font-weight: 600;
+}
+.pullback-status.up      { color: var(--accent-up); }
+.pullback-status.down    { color: var(--accent-down); }
+.pullback-status.neutral { color: var(--text-muted); }
+
+.pullback-bar {
+  position: relative;
+  height: 10px; border-radius: 6px;
+  background: linear-gradient(
+    to right,
+    #c0392b 0%,
+    #e89a3a 30%,
+    #d4c84a 50%,
+    #6fb86b 70%,
+    #2e9e60 100%
+  );
+  margin-bottom: 6px;
+}
+.pullback-marker {
+  position: absolute;
+  top: -3px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--text);
+  transform: translateX(-50%);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+.pullback-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  font-size: 9px; line-height: 1.3;
+  text-align: center;
+  color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.pullback-leg-l { text-align: left;  color: var(--accent-down); }
+.pullback-leg-c { text-align: center; }
+.pullback-leg-r { text-align: right; color: var(--accent-up); }
+.pullback-legend b { font-weight: 700; letter-spacing: 0.08em; }
 
 /* Factor block in drawer */
 .factors {
@@ -794,100 +921,168 @@ def _factor_row(label: str, weight, z) -> str:
     )
 
 
-def _sparkline_svg(
+def _residual_chart_svg(
     values: list[float],
-    width: int = 280, height: int = 56,
-    *, gradient: bool = True, klass: str = "sparkline",
-    grad_id: str = "spk_grad",
-) -> str:
-    """Inline SVG sparkline with a baseline reference and optional gradient fill.
+    width: int = 320, height: int = 110,
+    klass: str = "resid-chart",
+    grad_id: str = "rsd_grad",
+) -> tuple[str, float]:
+    """Centred residual chart with dashed zero baseline + gradient toward zero.
 
-    Stroke is a muted emerald or coral keyed to the 21-day net change.
-    A faint horizontal line sits at the start price as a reference. When
-    `gradient` is true, the area under the line is filled with a soft
-    gradient fading from the line colour to transparent at the bottom —
-    used for the larger drawer chart. Mini variants set gradient=False.
+    `values` are fractions (0.068 = +6.8%). Returns (svg_html, cap) where
+    `cap` is the vertical scale used (so the caller can render axis labels
+    that match the picture).
     """
     if not values or len(values) < 2:
-        return ""
+        return "", 0.10
     vmin, vmax = min(values), max(values)
-    rng = vmax - vmin
-    if rng <= 0:
-        return ""
+    peak = max(abs(vmin), abs(vmax))
+    # At least ±10%, rounded up to the nearest 5% with 10% headroom.
+    if peak <= 0.10:
+        cap = 0.10
+    elif peak <= 0.15:
+        cap = 0.15
+    elif peak <= 0.25:
+        cap = 0.25
+    else:
+        cap = (int((peak * 1.1) * 20) + 1) / 20.0
+    margin_y = 6
     n = len(values)
-    margin = 2
 
     def y_of(v: float) -> float:
-        return height - margin - (v - vmin) / rng * (height - 2 * margin)
+        center = height / 2
+        scale = (height / 2 - margin_y) / cap
+        return center - v * scale
 
     coords = [(i * width / (n - 1), y_of(v)) for i, v in enumerate(values)]
     pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
-    base_y = y_of(values[0])
-    up = values[-1] >= values[0]
-    line_color = "#34d399" if up else "#f87171"
+    base_y = y_of(0.0)
+    last = values[-1]
+    line_color = "#34d399" if last >= 0 else "#f87171"
 
-    grad_def = ""
-    fill = ""
-    if gradient:
-        grad_def = (
-            f'<defs><linearGradient id="{grad_id}" x1="0" y1="0" x2="0" y2="1">'
-            f'<stop offset="0%" stop-color="{line_color}" stop-opacity="0.32"/>'
-            f'<stop offset="100%" stop-color="{line_color}" stop-opacity="0.00"/>'
-            f'</linearGradient></defs>'
-        )
-        # Closed area path for the fill: line points, then down-right corner,
-        # then down-left corner, back to start.
-        first_x = coords[0][0]
-        last_x = coords[-1][0]
-        path_pts = " ".join(f"L {x:.1f} {y:.1f}" for x, y in coords[1:])
-        area_path = (
-            f"M {first_x:.1f} {coords[0][1]:.1f} {path_pts} "
-            f"L {last_x:.1f} {height} L {first_x:.1f} {height} Z"
-        )
-        fill = f'<path d="{area_path}" fill="url(#{grad_id})"/>'
+    first_x, last_x = coords[0][0], coords[-1][0]
+    path_segs = " ".join(f"L {x:.1f} {y:.1f}" for x, y in coords[1:])
+    area_path = (
+        f"M {first_x:.1f} {coords[0][1]:.1f} {path_segs} "
+        f"L {last_x:.1f} {base_y:.1f} L {first_x:.1f} {base_y:.1f} Z"
+    )
+    grad_def = (
+        f'<defs><linearGradient id="{grad_id}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0%" stop-color="{line_color}" stop-opacity="0.32"/>'
+        f'<stop offset="100%" stop-color="{line_color}" stop-opacity="0.00"/>'
+        f'</linearGradient></defs>'
+    )
 
-    return (
+    svg = (
         f'<svg class="{klass}" viewBox="0 0 {width} {height}" '
         f'preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
-        f'{grad_def}{fill}'
+        f'{grad_def}'
+        f'<path d="{area_path}" fill="url(#{grad_id})"/>'
         f'<line x1="0" y1="{base_y:.1f}" x2="{width}" y2="{base_y:.1f}" '
-        f'stroke="currentColor" stroke-opacity="0.20" stroke-width="1" '
-        f'stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/>'
+        f'stroke="currentColor" stroke-opacity="0.30" stroke-width="1" '
+        f'stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>'
         f'<polyline fill="none" stroke="{line_color}" stroke-width="1.6" '
         f'stroke-linejoin="round" stroke-linecap="round" '
         f'vector-effect="non-scaling-stroke" points="{pts}"/>'
         '</svg>'
     )
+    return svg, cap
 
 
-def _mini_sparkline_svg(values: list[float]) -> str:
-    """Compact sparkline for the collapsed row (no fill, smaller, no baseline)."""
+def _mini_residual_svg(values: list[float]) -> str:
+    """Compact residual sparkline for the collapsed row.
+
+    Centred on a faint zero baseline, line coloured by sign of the latest
+    value (not by net change vs the start) so a bouncing line that ends
+    above zero reads green.
+    """
     if not values or len(values) < 2:
         return ""
     vmin, vmax = min(values), max(values)
-    rng = vmax - vmin
-    if rng <= 0:
+    peak = max(abs(vmin), abs(vmax))
+    if peak <= 0:
         return ""
     width, height = 56, 22
-    margin = 1
+    margin = 2
     n = len(values)
 
     def y_of(v: float) -> float:
-        return height - margin - (v - vmin) / rng * (height - 2 * margin)
+        center = height / 2
+        scale = (height / 2 - margin) / max(peak, 1e-6)
+        return center - v * scale
 
     pts = " ".join(
         f"{i * width / (n - 1):.1f},{y_of(v):.1f}"
         for i, v in enumerate(values)
     )
-    up = values[-1] >= values[0]
-    line_color = "#34d399" if up else "#f87171"
+    base_y = y_of(0.0)
+    last = values[-1]
+    line_color = "#34d399" if last >= 0 else "#f87171"
     return (
         f'<svg class="mini-spark" viewBox="0 0 {width} {height}" '
         f'preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
+        f'<line x1="0" y1="{base_y:.1f}" x2="{width}" y2="{base_y:.1f}" '
+        f'stroke="currentColor" stroke-opacity="0.25" stroke-width="1" '
+        f'stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>'
         f'<polyline fill="none" stroke="{line_color}" stroke-width="1.4" '
         f'stroke-linejoin="round" stroke-linecap="round" '
         f'vector-effect="non-scaling-stroke" points="{pts}"/>'
         '</svg>'
+    )
+
+
+def _pullback_indicator_html(z: float | None) -> str:
+    """Gradient timing readout for the 21d pullback z-score.
+
+    Position on the bar is anchored so z = 0 sits at centre, z = -2 lands
+    at the right (oversold / green end), and z = +2 at the left (extended /
+    red end). Linearly interpolated, clamped to [0, 100]%.
+
+    Status thresholds:
+        z >= +1.0   →  Extended    (red)
+       -1.0 < z < +1.0 → Neutral    (muted)
+        z <= -1.0   →  Healthy pullback (green)
+    """
+    if z is None or pd.isna(z):
+        return ""
+    z = float(z)
+    pos_pct = 50.0 - (z * 25.0)
+    pos_pct = max(2.0, min(98.0, pos_pct))
+
+    if z >= 1.0:
+        status_label = "Extended"
+        status_cls = "down"
+    elif z <= -1.0:
+        status_label = "Healthy pullback"
+        status_cls = "up"
+    else:
+        status_label = "Neutral"
+        status_cls = "neutral"
+
+    z_cls = "up" if z >= 0 else "down"
+    z_text = f"Pullback Z: {z:+.1f}σ"
+
+    return (
+        '<div class="pullback-block">'
+        '<div class="pullback-head">'
+        '<div class="pullback-title">'
+        '<span class="pullback-label">21D PULLBACK</span>'
+        '<span class="pullback-axis">(vs 21D σ)</span>'
+        '</div>'
+        '<div class="pullback-readout">'
+        f'<span class="pullback-z {z_cls}">{z_text}</span>'
+        f'<span class="pullback-status {status_cls}">{status_label}</span>'
+        '</div>'
+        '</div>'
+        '<div class="pullback-bar">'
+        f'<div class="pullback-marker" style="left:{pos_pct:.1f}%"></div>'
+        '</div>'
+        '<div class="pullback-legend">'
+        '<span class="pullback-leg-l"><b>EXTENDED</b><br>(Overbought)</span>'
+        '<span class="pullback-leg-c"><b>NEUTRAL</b><br>(Fair Value)</span>'
+        '<span class="pullback-leg-r"><b>OVERSOLD</b><br>(Pullback)</span>'
+        '</div>'
+        '</div>'
     )
 
 
@@ -907,7 +1102,7 @@ def _row_html(
     scheme_scales: dict,
     rank_composite: dict, rank_cash: dict, rank_sector: dict,
     rank_ticker: dict, rank_mktcap: dict,
-    sparklines: dict | None = None,
+    diagnostics: dict | None = None,
     universe_labels: dict | None = None,
 ) -> str:
     """Render one <details class=row> card for a single ticker.
@@ -985,8 +1180,28 @@ def _row_html(
 
     explanation = _explain(mom_z, qual_z, val_z)
 
-    series = (sparklines or {}).get(ticker) or []
-    mini_spark_html = _mini_sparkline_svg(series) if series else ""
+    diag = (diagnostics or {}).get(ticker) or {}
+    chart_series = diag.get("chart_63d") or []
+    current_63d = diag.get("current_63d")
+    sigma_reading = diag.get("sigma_reading")
+    pullback_z = diag.get("pullback_z")
+
+    # Mini residual sparkline + small percent badge in the collapsed row.
+    if chart_series:
+        mini_spark_html = _mini_residual_svg(chart_series)
+        cur_pct = float(current_63d) if current_63d is not None else 0.0
+        pct_cls = "up" if cur_pct >= 0 else "down"
+        mini_pct_html = (
+            f'<span class="mini-pct {pct_cls}">{cur_pct*100:+.1f}%</span>'
+        )
+    else:
+        mini_spark_html = ""
+        mini_pct_html = ""
+    mini_cell_html = (
+        '<span class="mini-spark-cell">'
+        f'{mini_spark_html}{mini_pct_html}'
+        '</span>'
+    )
 
     exp_val = row.get("expectations_z")
     expectations_block = ""
@@ -1001,24 +1216,45 @@ def _row_html(
             '</div>'
         )
 
-    sparkline_block = ""
-    if series and rank_composite.get(ticker, 9999) < 25 and series[0] != 0:
-        grad_id = f"spk_{_escape(ticker).replace('.', '_').replace('-', '_')}"
-        svg = _sparkline_svg(series, gradient=True, grad_id=grad_id)
+    # Big 63d residual chart + 21d pullback indicator. Top-25 only.
+    diagnostics_block = ""
+    if chart_series and rank_composite.get(ticker, 9999) < 25:
+        grad_id = f"rg_{_escape(ticker).replace('.', '_').replace('-', '_')}"
+        svg, cap = _residual_chart_svg(chart_series, grad_id=grad_id)
         if svg:
-            pct = series[-1] / series[0] - 1.0
-            pct_cls = "up" if pct >= 0 else "down"
-            pct_str = f"{pct*100:+.2f}%"
-            sparkline_block = (
-                '<div class="sparkline-row">'
-                '<div class="sparkline-cap">'
-                '<span class="sparkline-label">21-day price</span>'
-                f'<span class="sparkline-pct {pct_cls}">21d: {pct_str}</span>'
+            cur_pct = float(current_63d) if current_63d is not None else 0.0
+            sig = float(sigma_reading) if sigma_reading is not None else 0.0
+            cur_cls = "up" if cur_pct >= 0 else "down"
+            sig_cls = "up" if sig >= 0 else "down"
+            cap_label = f"{cap*100:.0f}%"
+            chart_block = (
+                '<div class="resid-block">'
+                '<div class="resid-head">'
+                '<div class="resid-title">'
+                '<span class="resid-label">63D RESIDUAL RETURN</span>'
+                '<span class="resid-axis">(vs Market)</span>'
                 '</div>'
+                '<div class="resid-readout">'
+                f'<span class="resid-value {cur_cls}">{cur_pct*100:+.1f}%</span>'
+                f'<span class="resid-sigma {sig_cls}">({sig:+.1f}σ)</span>'
+                '</div>'
+                '</div>'
+                '<div class="resid-chart-wrap">'
+                f'<div class="resid-axis-tl">+{cap_label}</div>'
+                f'<div class="resid-axis-tr">+{cap_label}</div>'
+                f'<div class="resid-axis-bl">−{cap_label}</div>'
+                f'<div class="resid-axis-br">−{cap_label}</div>'
+                f'<div class="resid-axis-zero">0%</div>'
                 f'{svg}'
                 '</div>'
+                '<p class="resid-desc">Rolling 63-day cumulative residual '
+                'return after market removal.</p>'
+                '</div>'
             )
-
+        else:
+            chart_block = ""
+        pullback_html = _pullback_indicator_html(pullback_z) if pullback_z is not None else ""
+        diagnostics_block = chart_block + pullback_html
 
     order_style = (
         f"--r-c:{rank_composite.get(ticker, 0)};"
@@ -1047,13 +1283,13 @@ def _row_html(
         f'<span class="sector">{sector}</span>'
         f'{tags_html}'
         f'</span>'
-        f'<span class="mini-spark-cell">{mini_spark_html}</span>'
+        f'{mini_cell_html}'
         f'{cash_minis}'
         '</summary>'
         '<div class="expanded">'
         '<div class="divider"></div>'
         f'{full_name_block}'
-        f'{sparkline_block}'
+        f'{diagnostics_block}'
         f'<div class="factors">{factor_rows}</div>'
         f'<div class="explain">{explanation}</div>'
         f'{weight_lines}'
@@ -1498,7 +1734,7 @@ def _snapshot_archive_html() -> str:
 
 def render(
     ranked_df: pd.DataFrame, names: dict, factors_used: dict,
-    sparklines: dict | None = None,
+    diagnostics: dict | None = None,
 ) -> str:
     weights = factors_used.get("weights", {})
     scheme = factors_used.get("weighting_scheme", "")
@@ -1580,7 +1816,7 @@ def render(
     rows_html = "".join(
         _row_html(t, r, names, weights, cash, scheme_scales,
                   rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap,
-                  sparklines=sparklines, universe_labels=universe_labels)
+                  diagnostics=diagnostics, universe_labels=universe_labels)
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)
