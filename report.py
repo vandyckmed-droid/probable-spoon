@@ -472,6 +472,30 @@ svg.sparkline {
   font-variant-numeric: tabular-nums;
 }
 .cash-line b { font-weight: 600; color: var(--text-strong); }
+
+/* Diagnostic Expectations row (NOT in composite — visually separated). */
+.exp-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px dashed var(--line);
+  font-size: 12px;
+}
+.exp-label { color: var(--text-muted); font-weight: 500; }
+.exp-value {
+  font-family: var(--tabular);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.exp-value.up   { color: var(--accent-up); }
+.exp-value.down { color: var(--accent-down); }
+.exp-tag {
+  margin-left: auto;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 2px 7px; border: 1px solid var(--line);
+  border-radius: 4px;
+}
 """
 
 
@@ -830,6 +854,19 @@ def _row_html(
     series = (sparklines or {}).get(ticker) or []
     mini_spark_html = _mini_sparkline_svg(series) if series else ""
 
+    exp_val = row.get("expectations_z")
+    expectations_block = ""
+    if pd.notna(exp_val):
+        ez = float(exp_val)
+        ez_cls = "up" if ez >= 0 else "down"
+        expectations_block = (
+            '<div class="exp-row">'
+            '<span class="exp-label">Expectations</span>'
+            f'<span class="exp-value {ez_cls}">{ez:+.2f}σ</span>'
+            '<span class="exp-tag">Diagnostic</span>'
+            '</div>'
+        )
+
     sparkline_block = ""
     if series and rank_composite.get(ticker, 9999) < 25 and series[0] != 0:
         grad_id = f"spk_{_escape(ticker).replace('.', '_').replace('-', '_')}"
@@ -886,6 +923,7 @@ def _row_html(
         f'<div class="factors">{factor_rows}</div>'
         f'<div class="explain">{explanation}</div>'
         f'{weight_lines}'
+        f'{expectations_block}'
         '</div>'
         '</details>'
     )
@@ -946,6 +984,20 @@ _METHODOLOGY_BODY = (
     'Missing factors contribute zero. If the share of the universe with a '
     'finite Quality or Value z-score falls below 40%, that factor is dropped '
     'and the surviving weights renormalise.</p>'
+
+    '<h3>Expectations <span class="exp-tag">Diagnostic</span></h3>'
+    '<p>An experimental fourth factor reading analyst behaviour on each '
+    'name. Two raw components: <b>forward EPS growth</b> = next-year '
+    'consensus / current-year consensus − 1 (from FMP analyst-estimates), '
+    'and <b>earnings surprise</b> = (actual EPS − estimated EPS) / '
+    '|estimated EPS| on the most recent reported quarter (from FMP '
+    'earnings-surprises). Each component is winsorised and z-scored within '
+    'its sector with the same small-sector fallback as Quality / Value, '
+    'blended 50/50, then winsorised and z-scored across the universe to '
+    'produce expectations_z. Surfaced on every card\'s expanded panel as '
+    'a diagnostic line — <b>not in the composite yet</b>. Step 2 will '
+    'orthogonalise it against M/Q/V and promote into the composite at a '
+    '0.10 weight if coverage and signal hold up.</p>'
 
     '<h3>Universe &amp; screener</h3>'
     '<p>Stocks live in data/universe.json plus data/universe_extra.txt. '

@@ -15,6 +15,7 @@ import weights as weights_mod
 from config import (
     MARKET_TICKER, TOP_N, WEIGHTING_SCHEME, WEIGHT_LOOKBACK_DAYS,
     CASH_DEPLOYMENT, BETA_LOOKBACK_DAYS, VOL_TARGET, BACKTEST_DAYS,
+    EXPECTATIONS_ENABLED,
 )
 from universe import (
     classify_universe, exclusion_reason_label,
@@ -114,6 +115,7 @@ def main():
         store.ensure(
             raw_tickers,
             with_prices=False,
+            with_revisions=EXPECTATIONS_ENABLED,
             force=args.refresh,
         )
 
@@ -145,6 +147,30 @@ def main():
     qual_df, _ = analytics.compute_quality(funds, ts)
     val_df, _ = analytics.compute_value(funds, prices_df, ts)
     ranked, factors_used = analytics.build_ranked(mom_df, qual_df, val_df, ts)
+
+    # Diagnostic Expectations factor (step 1) — NOT in composite. Attaches as
+    # a separate column the report surfaces in each card's expanded panel.
+    if EXPECTATIONS_ENABLED:
+        revisions_data = store.revisions()
+        exp_df, exp_meta = analytics.compute_expectations(revisions_data, ts)
+        if not exp_df.empty:
+            ranked["expectations_z"] = ranked.index.map(exp_df["expectations_z"])
+        else:
+            ranked["expectations_z"] = float("nan")
+        eligible_n = len(tickers) or 1
+        coverage = float(exp_df["expectations_z"].notna().sum()) / eligible_n if not exp_df.empty else 0.0
+        factors_used["expectations_enabled"] = True
+        factors_used["expectations_coverage"] = coverage
+        factors_used["expectations_count"] = int(
+            exp_df["expectations_z"].notna().sum() if not exp_df.empty else 0
+        )
+        print(
+            f"Expectations (diagnostic): "
+            f"{factors_used['expectations_count']} of {eligible_n} eligible "
+            f"({coverage*100:.1f}% coverage)"
+        )
+    else:
+        factors_used["expectations_enabled"] = False
 
     top_n = min(TOP_N, len(ranked))
     top_tickers = ranked.head(top_n).index.tolist()

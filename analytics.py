@@ -12,6 +12,7 @@ from config import (
     W_MOMENTUM, W_QUALITY, W_VALUE,
     QUALITY_FALLBACK_THRESHOLD, VALUE_FALLBACK_THRESHOLD,
     MIN_SECTOR_SIZE,
+    EXP_GROWTH_W, EXP_SURPRISE_W,
 )
 
 
@@ -324,6 +325,89 @@ def compute_value(
     coverage = df["value_z"].notna().sum() / len(funds) if funds else 0.0
     cols = ["sector", "market_cap", "ebit_ev", "fcf_ev", "book_mc",
             "ebit_ev_z", "fcf_ev_z", "book_mc_z", "value_raw", "value_z"]
+    return df[cols], {"coverage": float(coverage)}
+
+
+def compute_expectations(
+    revisions_data: dict,
+    ticker_sector: dict[str, str],
+) -> tuple[pd.DataFrame, dict]:
+    """Diagnostic Expectations score from analyst estimates + earnings surprises.
+
+    Components:
+      growth   = next-year EPS consensus / current-year EPS consensus − 1
+                 (only when current consensus > 0)
+      surprise = (actual_eps − estimated_eps) / |estimated_eps|
+                 (most recent reported quarter)
+
+    Each component is winsorised + z-scored within sector (small-sector
+    fallback to a universe-wide z below MIN_SECTOR_SIZE), blended
+    EXP_GROWTH_W / EXP_SURPRISE_W, then a universe-wide winsor + z-score
+    on the composite produces expectations_z.
+
+    Returns (df, meta). df is indexed by ticker with columns:
+        sector, growth, surprise, growth_z, surprise_z,
+        expectations_raw, expectations_z
+    meta = {"coverage": fraction_of_input_tickers_with_finite_z}.
+    """
+    rows: dict[str, dict] = {}
+    for ticker, data in revisions_data.items():
+        if ticker not in ticker_sector:
+            continue
+        estimates = data.get("estimates") or []
+        surprises = data.get("surprises") or []
+
+        # Forward EPS growth from the two nearest annual consensus snapshots.
+        growth = float("nan")
+        valid_est = [e for e in estimates if isinstance(e, dict) and e.get("date")]
+        if len(valid_est) >= 2:
+            sorted_est = sorted(valid_est, key=lambda e: e.get("date") or "")
+            curr = sorted_est[0].get("epsAvg")
+            nxt = sorted_est[1].get("epsAvg")
+            if (
+                isinstance(curr, (int, float)) and isinstance(nxt, (int, float))
+                and curr > 0
+            ):
+                growth = float(nxt) / float(curr) - 1.0
+
+        # Most recent earnings surprise, scaled by |estimate|.
+        surprise = float("nan")
+        if surprises and isinstance(surprises[0], dict):
+            recent = surprises[0]
+            actual = recent.get("actualEarningResult")
+            estimate = recent.get("estimatedEarning")
+            if (
+                isinstance(actual, (int, float))
+                and isinstance(estimate, (int, float))
+                and estimate != 0
+            ):
+                surprise = (float(actual) - float(estimate)) / abs(float(estimate))
+
+        if pd.isna(growth) and pd.isna(surprise):
+            continue
+        rows[ticker] = {
+            "sector": ticker_sector.get(ticker, "Unknown"),
+            "growth": growth,
+            "surprise": surprise,
+        }
+
+    if not rows:
+        return pd.DataFrame(), {"coverage": 0.0}
+    df = pd.DataFrame.from_dict(rows, orient="index")
+    sectors = df["sector"]
+    df["growth_z"] = _winsor_zscore_within_sector(df["growth"], sectors)
+    df["surprise_z"] = _winsor_zscore_within_sector(df["surprise"], sectors)
+    df["expectations_raw"] = (
+        EXP_GROWTH_W * df["growth_z"].fillna(0)
+        + EXP_SURPRISE_W * df["surprise_z"].fillna(0)
+    )
+    df["expectations_z"] = _zscore(_winsorize(df["expectations_raw"]))
+    coverage = (
+        df["expectations_z"].notna().sum() / len(revisions_data)
+        if revisions_data else 0.0
+    )
+    cols = ["sector", "growth", "surprise", "growth_z", "surprise_z",
+            "expectations_raw", "expectations_z"]
     return df[cols], {"coverage": float(coverage)}
 
 

@@ -1,9 +1,11 @@
 """Unified data-layer facade. Orchestrators import only this module."""
 import pandas as pd
 
+import config
 import fundamentals as fundamentals_mod
 import prices as prices_mod
 import profiles as profiles_mod
+import revisions as revisions_mod
 import universe as universe_mod
 
 
@@ -18,6 +20,7 @@ def ensure(
     with_prices: bool = True,
     with_fundamentals: bool = True,
     with_profiles: bool = True,
+    with_revisions: bool = False,
     force: bool = False,
     no_fetch: bool = False,
 ) -> None:
@@ -32,6 +35,8 @@ def ensure(
         fundamentals_mod.fetch_fundamentals(tickers, force=force, no_fetch=no_fetch)
     if with_profiles:
         profiles_mod.fetch_profiles(tickers, force=force, no_fetch=no_fetch)
+    if with_revisions and getattr(config, "EXPECTATIONS_ENABLED", False):
+        revisions_mod.fetch_revisions(tickers, force=force, no_fetch=no_fetch)
 
 
 def prices() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -49,6 +54,11 @@ def prices() -> tuple[pd.DataFrame, pd.DataFrame]:
 def fundamentals() -> dict:
     """{ticker: {income, balance, cashflow, fetched}}."""
     return fundamentals_mod.load_cache().get("data", {})
+
+
+def revisions() -> dict:
+    """{ticker: {estimates, surprises, fetched}}."""
+    return revisions_mod.load_cache().get("data", {})
 
 
 def profiles() -> dict:

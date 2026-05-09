@@ -58,6 +58,14 @@ CASH_DEPLOYMENT      = 30000           # default $; overridden by `main.py --cas
 VOL_TARGET           = 0.12            # annualised target portfolio vol; None disables
 BACKTEST_DAYS        = 126             # ~6 months of look-back attribution
 
+# Expectations factor — diagnostic only in step 1, NOT in composite yet.
+# Flip to False to disable the fetch + render entirely.
+EXPECTATIONS_ENABLED      = True
+REVISIONS_CACHE           = "cache/revisions.pkl"
+REVISIONS_REFRESH_DAYS    = 7
+EXP_GROWTH_W              = 0.50  # forward EPS growth weight
+EXP_SURPRISE_W            = 0.50  # latest earnings surprise weight
+
 # Universe / market
 MARKET_TICKER = "VTI"
 
