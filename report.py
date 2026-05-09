@@ -573,6 +573,13 @@ svg.resid-chart {
 .factors .contrib .w {
   color: var(--text-faint); font-weight: 400; margin-left: 6px;
 }
+/* Z-score colour buckets — same thresholds as the composite pill so the
+   factor σ readouts and the pill stay in sync visually. */
+.factors .z.up-strong   { color: var(--accent-up); }
+.factors .z.up-light    { color: var(--accent-up); opacity: 0.78; }
+.factors .z.down-strong { color: var(--accent-down); }
+.factors .z.down-light  { color: var(--accent-down); opacity: 0.78; }
+.factors .z.flat        { color: var(--text-muted); }
 .factors .total .label,
 .factors .total .contrib {
   font-weight: 700;
@@ -580,6 +587,10 @@ svg.resid-chart {
   color: var(--text-strong);
   letter-spacing: -0.01em;
 }
+.factors .total .contrib.up-strong   { color: var(--accent-up); }
+.factors .total .contrib.up-light    { color: var(--accent-up); opacity: 0.85; }
+.factors .total .contrib.down-strong { color: var(--accent-down); }
+.factors .total .contrib.down-light  { color: var(--accent-down); opacity: 0.85; }
 .factors .total .label,
 .factors .total .z,
 .factors .total .contrib {
@@ -905,6 +916,10 @@ def _explain(mom_z, qual_z, val_z) -> str:
 
 def _factor_row(label: str, weight, z) -> str:
     z_html = _fmt_z(z)
+    if z is None or pd.isna(z):
+        z_cls = "flat"
+    else:
+        z_cls = _pill_class(float(z))
     if weight is None or weight == 0:
         contrib = '<span class="muted">excluded</span>'
         weight_html = ""
@@ -916,7 +931,7 @@ def _factor_row(label: str, weight, z) -> str:
         weight_html = f'<span class="w">{int(round(weight*100))}%</span>'
     return (
         f'<div class="label">{label}</div>'
-        f'<div class="z">{z_html}</div>'
+        f'<div class="z {z_cls}">{z_html}</div>'
         f'<div class="contrib">{contrib} {weight_html}</div>'
     )
 
@@ -927,17 +942,19 @@ def _residual_chart_svg(
     klass: str = "resid-chart",
     grad_id: str = "rsd_grad",
 ) -> tuple[str, float]:
-    """Centred residual chart with dashed zero baseline + gradient toward zero.
+    """Centred residual chart with dashed zero baseline + vertical gradient stroke.
 
-    `values` are fractions (0.068 = +6.8%). Returns (svg_html, cap) where
-    `cap` is the vertical scale used (so the caller can render axis labels
-    that match the picture).
+    The polyline is stroked with a vertical linear gradient in user-space
+    coords (green at the top of the chart → neutral grey at the zero line
+    → red at the bottom). Each segment picks up its colour from its own
+    y-position, so positive history reads green even when the line later
+    dips below zero. `cap` is returned for the caller to render matching
+    corner labels.
     """
     if not values or len(values) < 2:
         return "", 0.10
     vmin, vmax = min(values), max(values)
     peak = max(abs(vmin), abs(vmax))
-    # At least ±10%, rounded up to the nearest 5% with 10% headroom.
     if peak <= 0.10:
         cap = 0.10
     elif peak <= 0.15:
@@ -957,44 +974,44 @@ def _residual_chart_svg(
     coords = [(i * width / (n - 1), y_of(v)) for i, v in enumerate(values)]
     pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
     base_y = y_of(0.0)
-    last = values[-1]
-    line_color = "#34d399" if last >= 0 else "#f87171"
 
-    first_x, last_x = coords[0][0], coords[-1][0]
-    path_segs = " ".join(f"L {x:.1f} {y:.1f}" for x, y in coords[1:])
-    area_path = (
-        f"M {first_x:.1f} {coords[0][1]:.1f} {path_segs} "
-        f"L {last_x:.1f} {base_y:.1f} L {first_x:.1f} {base_y:.1f} Z"
-    )
-    grad_def = (
-        f'<defs><linearGradient id="{grad_id}" x1="0" y1="0" x2="0" y2="1">'
-        f'<stop offset="0%" stop-color="{line_color}" stop-opacity="0.32"/>'
-        f'<stop offset="100%" stop-color="{line_color}" stop-opacity="0.00"/>'
+    # Vertical gradient defined in user-space coords. With viewBox 0..height,
+    # a stop at 0% lands at the top (largest positive value), 50% lands at
+    # the zero line (height/2), 100% at the bottom (most negative). Stop
+    # colours are the same emerald / muted-grey / coral palette used by the
+    # composite pill; the grey middle keeps near-zero history honest-looking.
+    stroke_grad_def = (
+        f'<defs><linearGradient id="{grad_id}" gradientUnits="userSpaceOnUse" '
+        f'x1="0" y1="0" x2="0" y2="{height}">'
+        f'<stop offset="0%" stop-color="#34d399"/>'
+        f'<stop offset="35%" stop-color="#34d399"/>'
+        f'<stop offset="50%" stop-color="#9aa0a6"/>'
+        f'<stop offset="65%" stop-color="#f87171"/>'
+        f'<stop offset="100%" stop-color="#f87171"/>'
         f'</linearGradient></defs>'
     )
 
-    svg = (
+    return (
         f'<svg class="{klass}" viewBox="0 0 {width} {height}" '
         f'preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
-        f'{grad_def}'
-        f'<path d="{area_path}" fill="url(#{grad_id})"/>'
+        f'{stroke_grad_def}'
         f'<line x1="0" y1="{base_y:.1f}" x2="{width}" y2="{base_y:.1f}" '
         f'stroke="currentColor" stroke-opacity="0.30" stroke-width="1" '
         f'stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>'
-        f'<polyline fill="none" stroke="{line_color}" stroke-width="1.6" '
+        f'<polyline fill="none" stroke="url(#{grad_id})" stroke-width="1.7" '
         f'stroke-linejoin="round" stroke-linecap="round" '
         f'vector-effect="non-scaling-stroke" points="{pts}"/>'
         '</svg>'
-    )
-    return svg, cap
+    ), cap
 
 
-def _mini_residual_svg(values: list[float]) -> str:
+def _mini_residual_svg(
+    values: list[float], grad_id: str = "mini_rsd_grad",
+) -> str:
     """Compact residual sparkline for the collapsed row.
 
-    Centred on a faint zero baseline, line coloured by sign of the latest
-    value (not by net change vs the start) so a bouncing line that ends
-    above zero reads green.
+    Uses the same value-mapped vertical gradient as the big chart so positive
+    history reads green and negative reads red along the same line.
     """
     if not values or len(values) < 2:
         return ""
@@ -1016,15 +1033,22 @@ def _mini_residual_svg(values: list[float]) -> str:
         for i, v in enumerate(values)
     )
     base_y = y_of(0.0)
-    last = values[-1]
-    line_color = "#34d399" if last >= 0 else "#f87171"
+    grad_def = (
+        f'<defs><linearGradient id="{grad_id}" gradientUnits="userSpaceOnUse" '
+        f'x1="0" y1="0" x2="0" y2="{height}">'
+        f'<stop offset="0%" stop-color="#34d399"/>'
+        f'<stop offset="50%" stop-color="#9aa0a6"/>'
+        f'<stop offset="100%" stop-color="#f87171"/>'
+        f'</linearGradient></defs>'
+    )
     return (
         f'<svg class="mini-spark" viewBox="0 0 {width} {height}" '
         f'preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
+        f'{grad_def}'
         f'<line x1="0" y1="{base_y:.1f}" x2="{width}" y2="{base_y:.1f}" '
         f'stroke="currentColor" stroke-opacity="0.25" stroke-width="1" '
         f'stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>'
-        f'<polyline fill="none" stroke="{line_color}" stroke-width="1.4" '
+        f'<polyline fill="none" stroke="url(#{grad_id})" stroke-width="1.5" '
         f'stroke-linejoin="round" stroke-linecap="round" '
         f'vector-effect="non-scaling-stroke" points="{pts}"/>'
         '</svg>'
@@ -1152,6 +1176,7 @@ def _row_html(
     mom_z = row.get("residual_momentum_z")
     qual_z = row.get("quality_z")
     val_z = row.get("value_z")
+    total_cls = _pill_class(composite) if composite is not None else "flat"
     factor_rows = (
         _factor_row("Momentum", weights.get("momentum"), mom_z)
         + _factor_row("Quality", weights.get("quality"), qual_z)
@@ -1159,7 +1184,7 @@ def _row_html(
         + (
             '<div class="label total">Composite</div>'
             '<div class="z total"></div>'
-            f'<div class="contrib total">{composite_text}</div>'
+            f'<div class="contrib total {total_cls}">{composite_text}</div>'
         )
     )
 
@@ -1186,9 +1211,12 @@ def _row_html(
     sigma_reading = diag.get("sigma_reading")
     pullback_z = diag.get("pullback_z")
 
+    # Per-ticker gradient id keeps SVG defs from colliding across rows.
+    safe_id = _escape(ticker).replace('.', '_').replace('-', '_')
+
     # Mini residual sparkline + small percent badge in the collapsed row.
     if chart_series:
-        mini_spark_html = _mini_residual_svg(chart_series)
+        mini_spark_html = _mini_residual_svg(chart_series, grad_id=f"mg_{safe_id}")
         cur_pct = float(current_63d) if current_63d is not None else 0.0
         pct_cls = "up" if cur_pct >= 0 else "down"
         mini_pct_html = (
@@ -1219,8 +1247,7 @@ def _row_html(
     # Big 63d residual chart + 21d pullback indicator. Top-25 only.
     diagnostics_block = ""
     if chart_series and rank_composite.get(ticker, 9999) < 25:
-        grad_id = f"rg_{_escape(ticker).replace('.', '_').replace('-', '_')}"
-        svg, cap = _residual_chart_svg(chart_series, grad_id=grad_id)
+        svg, cap = _residual_chart_svg(chart_series, grad_id=f"rg_{safe_id}")
         if svg:
             cur_pct = float(current_63d) if current_63d is not None else 0.0
             sig = float(sigma_reading) if sigma_reading is not None else 0.0
