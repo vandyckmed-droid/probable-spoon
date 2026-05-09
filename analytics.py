@@ -203,7 +203,8 @@ def compute_quality(
     funds: dict,
     ticker_sector: dict[str, str],
 ) -> tuple[pd.DataFrame, dict]:
-    """Sector-level z on quality components, then composite quality_z."""
+    """Sector-relative z on quality components, then a universe-wide z on
+    the weighted composite so quality_z is comparable to momentum_z."""
     rows: dict[str, dict] = {}
     for ticker, data in funds.items():
         if ticker not in ticker_sector:
@@ -253,7 +254,7 @@ def compute_quality(
         + Q_GP_CHANGE_W * df["gp_change_z"].fillna(0)
         + Q_NETDEBT_W * df["nd_z"].fillna(0)
     )
-    df["quality_z"] = _winsor_zscore_within_sector(df["quality_raw"], sectors)
+    df["quality_z"] = _zscore(_winsorize(df["quality_raw"]))
     coverage = df["quality_z"].notna().sum() / len(funds) if funds else 0.0
     cols = ["sector", "gross_profitability", "gp_change", "balance_sheet_quality",
             "gp_z", "gp_change_z", "nd_z", "quality_raw", "quality_z"]
@@ -265,7 +266,8 @@ def compute_value(
     prices: pd.DataFrame,
     ticker_sector: dict[str, str],
 ) -> tuple[pd.DataFrame, dict]:
-    """Sector-level z on value components, then composite value_z."""
+    """Sector-relative z on value components, then a universe-wide z on
+    the weighted composite so value_z is comparable to momentum_z."""
     rows: dict[str, dict] = {}
     for ticker, data in funds.items():
         if ticker not in ticker_sector:
@@ -317,7 +319,7 @@ def compute_value(
         V_EBIT_EV_W * df["ebit_ev_z"].fillna(0)
         + V_FCF_EV_W * df["fcf_ev_z"].fillna(0)
     )
-    df["value_z"] = _winsor_zscore_within_sector(df["value_raw"], sectors)
+    df["value_z"] = _zscore(_winsorize(df["value_raw"]))
     coverage = df["value_z"].notna().sum() / len(funds) if funds else 0.0
     cols = ["sector", "market_cap", "ebit_ev", "fcf_ev", "book_mc",
             "ebit_ev_z", "fcf_ev_z", "book_mc_z", "value_raw", "value_z"]
