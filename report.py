@@ -474,6 +474,83 @@ svg.sparkline {
 .cash-line b { font-weight: 600; color: var(--text-strong); }
 
 /* Diagnostic Expectations row (NOT in composite — visually separated). */
+/* Universe card — descriptive stats + filter status */
+.uni-h {
+  font-size: 11px; font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin: 14px 0 6px;
+}
+.uni-h:first-child { margin-top: 0; }
+.uni-table {
+  display: grid;
+  grid-template-columns: 1fr auto 56px;
+  column-gap: 12px; row-gap: 4px;
+  font-size: 13px;
+}
+.uni-row {
+  display: contents;
+}
+.uni-label { color: var(--text-strong); }
+.uni-count {
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text-strong);
+}
+.uni-pct {
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text-muted);
+}
+.uni-stats {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 8px;
+}
+.uni-stats b { color: var(--text-strong); font-weight: 600; }
+.uni-empty { color: var(--text-faint); font-style: italic; }
+.uni-filters {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  column-gap: 12px; row-gap: 6px;
+  font-size: 12px;
+}
+.uni-filter-row { display: contents; }
+.uni-filter-state {
+  font-family: var(--tabular);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 1px 7px; border-radius: 4px;
+  border: 1px solid var(--line);
+}
+.uni-filter-state.on  { color: var(--accent-up); border-color: var(--accent-up); }
+.uni-filter-state.off { color: var(--text-faint); }
+.uni-filter-cli {
+  font-family: var(--tabular);
+  font-size: 11px; color: var(--text-faint);
+}
+.uni-collapse {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+.uni-collapse > summary {
+  cursor: pointer; list-style: none;
+  font-size: 11px; font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.uni-collapse > summary::-webkit-details-marker { display: none; }
+.uni-collapse > summary::before {
+  content: '\\203A'; color: var(--text-faint);
+  margin-right: 6px; display: inline-block;
+  transition: transform 0.15s;
+}
+.uni-collapse[open] > summary::before { transform: rotate(90deg); }
+.uni-industries { margin-top: 10px; font-size: 12px; }
+
 .exp-row {
   display: flex; align-items: center; gap: 10px;
   margin-top: 14px; padding-top: 12px;
@@ -1099,6 +1176,156 @@ def _backtest_row(label: str, bt: dict | None) -> str:
     )
 
 
+def _fmt_mkt_cap(x) -> str:
+    if x is None or pd.isna(x) or x <= 0:
+        return "—"
+    if x >= 1e12:
+        return f"${x / 1e12:.2f}T"
+    if x >= 1e9:
+        return f"${x / 1e9:.1f}B"
+    if x >= 1e6:
+        return f"${x / 1e6:.0f}M"
+    return f"${x:,.0f}"
+
+
+def _uni_table_rows(rows: list, total: int) -> str:
+    """Three-column rows (label / count / pct) for the Universe section."""
+    out = []
+    for label, count in rows:
+        if total > 0:
+            pct = count / total * 100.0
+            pct_str = f"{pct:.1f}%"
+        else:
+            pct_str = "—"
+        out.append(
+            '<div class="uni-row">'
+            f'<span class="uni-label">{_escape(label)}</span>'
+            f'<span class="uni-count">{count}</span>'
+            f'<span class="uni-pct">{pct_str}</span>'
+            '</div>'
+        )
+    return "".join(out)
+
+
+def _universe_section_html(factors_used: dict) -> str:
+    """Build the Universe card.
+
+    Top: subtitle line summarising raw / eligible / active counts and any
+    active filters. Body: composition (Common / ADR / REIT / MLP / unknown),
+    sectors, market-cap stats + buckets, an Industries sub-drawer, and an
+    Active Filters block surfaced regardless of whether filters fired.
+    """
+    pulse = factors_used.get("universe_pulse") or {}
+    raw_n = factors_used.get("universe_raw_count") or 0
+    eligible_n = factors_used.get("universe_eligible_count") or 0
+    active_n = factors_used.get("universe_active_count") or pulse.get("n") or 0
+    filters = factors_used.get("universe_active_filters") or {}
+
+    # Subtitle
+    bits = [f"{active_n} active"]
+    if eligible_n != active_n:
+        bits.append(f"{eligible_n} eligible")
+    if raw_n and raw_n != eligible_n:
+        bits.append(f"{raw_n - eligible_n} excluded by hygiene")
+    if filters.get("removed_count"):
+        names = []
+        if filters.get("exclude_adr"):
+            names.append("ADRs")
+        if filters.get("exclude_reit"):
+            names.append("REITs")
+        bits.append(
+            f"filters: {', '.join(names)} ({filters['removed_count']} dropped)"
+        )
+    elif filters.get("exclude_adr") or filters.get("exclude_reit"):
+        bits.append("filters: active (none matched)")
+    subtitle = " · ".join(bits)
+
+    if not pulse or pulse.get("n", 0) == 0:
+        body = '<p class="uni-empty">No active universe to summarise.</p>'
+    else:
+        composition = pulse.get("composition") or []
+        sectors = pulse.get("sectors") or []
+        industries = pulse.get("industries") or []
+        mc = pulse.get("market_cap") or {}
+        buckets = pulse.get("buckets") or []
+        n = pulse.get("n", 0)
+
+        composition_table = _uni_table_rows(composition, n)
+        sector_table = _uni_table_rows(sectors, n)
+        bucket_table = _uni_table_rows(buckets, n)
+        industry_table = _uni_table_rows(industries, n)
+
+        if mc:
+            mc_line = (
+                f'<p class="uni-stats">'
+                f'Median <b>{_fmt_mkt_cap(mc.get("median"))}</b> · '
+                f'Min <b>{_fmt_mkt_cap(mc.get("min"))}</b> · '
+                f'Max <b>{_fmt_mkt_cap(mc.get("max"))}</b> · '
+                f'{mc.get("n_with_data", 0)} of {n} with data'
+                '</p>'
+            )
+        else:
+            mc_line = (
+                '<p class="uni-stats uni-empty">No market-cap data available '
+                'yet — run main.py --update once.</p>'
+            )
+
+        # Active filters block — always rendered so users see the controls
+        # exist, even when all are off.
+        def _row(label: str, on: bool, cli: str) -> str:
+            mark = "On" if on else "Off"
+            cls = "on" if on else "off"
+            return (
+                f'<div class="uni-filter-row">'
+                f'<span class="uni-label">{_escape(label)}</span>'
+                f'<span class="uni-filter-state {cls}">{mark}</span>'
+                f'<span class="uni-filter-cli">{_escape(cli)}</span>'
+                '</div>'
+            )
+        filters_block = (
+            _row("Exclude ADRs", bool(filters.get("exclude_adr")), "--exclude-adr")
+            + _row("Exclude REITs", bool(filters.get("exclude_reit")), "--exclude-reit")
+            + '<div class="uni-filter-row">'
+              '<span class="uni-label">Min / max market cap</span>'
+              '<span class="uni-filter-state off">Deferred</span>'
+              '<span class="uni-filter-cli">v0.2</span>'
+              '</div>'
+            + '<div class="uni-filter-row">'
+              '<span class="uni-label">Sector / industry exclusions</span>'
+              '<span class="uni-filter-state off">Deferred</span>'
+              '<span class="uni-filter-cli">v0.2</span>'
+              '</div>'
+        )
+
+        body = (
+            '<h4 class="uni-h">Composition</h4>'
+            f'<div class="uni-table">{composition_table}</div>'
+            '<h4 class="uni-h">Sectors</h4>'
+            f'<div class="uni-table">{sector_table}</div>'
+            '<h4 class="uni-h">Market cap</h4>'
+            f'{mc_line}'
+            f'<div class="uni-table">{bucket_table}</div>'
+            '<h4 class="uni-h">Active filters</h4>'
+            f'<div class="uni-filters">{filters_block}</div>'
+            f'<details class="uni-collapse">'
+            f'<summary>Industries ({len(industries)})</summary>'
+            f'<div class="uni-table uni-industries">{industry_table}</div>'
+            '</details>'
+        )
+
+    return (
+        '<details class="section">'
+        '<summary>'
+        '<div class="section-head">'
+        '<div class="section-title">Universe</div>'
+        f'<div class="section-subtitle">{_escape(subtitle)}</div>'
+        '</div>'
+        '</summary>'
+        f'<div class="section-body">{body}</div>'
+        '</details>'
+    )
+
+
 def _backtest_section_html(bt: dict) -> str:
     lookback = bt.get("lookback_days") or 0
     eq = bt.get("equal")
@@ -1317,6 +1544,7 @@ def render(
     )
 
     backtest_section = _backtest_section_html(factors_used.get("backtest") or {})
+    universe_section = _universe_section_html(factors_used)
 
     raw_count = factors_used.get("universe_raw_count")
     eligible_count = factors_used.get("universe_eligible_count")
@@ -1391,6 +1619,7 @@ def render(
         '</div>'
         '</div>'
         f'{full_section}'
+        f'{universe_section}'
         f'{backtest_section}'
         f'{methodology_section}'
         f'{js_block}'

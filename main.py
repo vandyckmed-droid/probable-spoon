@@ -8,6 +8,8 @@ from pathlib import Path
 warnings.filterwarnings("ignore", message=".*interpolation.*", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=".*quick_look.*", category=DeprecationWarning)
 
+import pandas as pd
+
 import analytics
 import report
 import store
@@ -54,6 +56,88 @@ def _open_file(path: Path) -> None:
         print(f"(could not auto-open: {e})")
 
 
+_MKT_CAP_BUCKETS: list[tuple[str, float, float]] = [
+    ("Mega (≥$200B)",        200e9, float("inf")),
+    ("Large ($10B–$200B)",    10e9,  200e9),
+    ("Mid ($2B–$10B)",         2e9,   10e9),
+    ("Small ($300M–$2B)",    300e6,    2e9),
+    ("Micro (<$300M)",                0.0, 300e6),
+]
+
+
+def _build_universe_pulse(
+    tickers: list, profiles_data: dict, labels: dict, ranked,
+) -> dict:
+    """Descriptive stats for the Universe Pulse section.
+
+    Operates on the post-filter active set so the numbers describe what is
+    actually scoring. Sectors and industries come from cached profiles;
+    market-cap stats come from `ranked` (which has it computed once per run).
+    """
+    n = len(tickers)
+    if n == 0:
+        return {"n": 0}
+
+    adr_n = sum(1 for t in tickers if "ADR" in (labels.get(t) or []))
+    reit_n = sum(1 for t in tickers if "REIT" in (labels.get(t) or []))
+    mlp_n = sum(1 for t in tickers if "MLP" in (labels.get(t) or []))
+    classified = sum(1 for t in tickers if profiles_data.get(t))
+    unknown = n - classified
+    common = max(0, n - adr_n - mlp_n)
+    composition = [
+        ("Common stock", common),
+        ("ADR", adr_n),
+        ("REIT", reit_n),
+        ("MLP", mlp_n),
+        ("Unclassified", unknown),
+    ]
+
+    sectors: dict[str, int] = {}
+    industries: dict[str, int] = {}
+    for t in tickers:
+        prof = profiles_data.get(t) or {}
+        sec = (prof.get("sector") or "Unknown").strip() or "Unknown"
+        ind = (prof.get("industry") or "Unknown").strip() or "Unknown"
+        sectors[sec] = sectors.get(sec, 0) + 1
+        industries[ind] = industries.get(ind, 0) + 1
+
+    sector_rows = sorted(sectors.items(), key=lambda kv: (-kv[1], kv[0]))
+    industry_rows = sorted(industries.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    mkt_caps: list[float] = []
+    if ranked is not None and not ranked.empty and "market_cap" in ranked.columns:
+        for t in tickers:
+            if t in ranked.index:
+                mc = ranked.loc[t, "market_cap"]
+                if pd.notna(mc) and mc > 0:
+                    mkt_caps.append(float(mc))
+    mkt_caps_sorted = sorted(mkt_caps)
+    if mkt_caps_sorted:
+        median = mkt_caps_sorted[len(mkt_caps_sorted) // 2]
+        mc_stats = {
+            "median": median,
+            "min": mkt_caps_sorted[0],
+            "max": mkt_caps_sorted[-1],
+            "n_with_data": len(mkt_caps_sorted),
+        }
+    else:
+        mc_stats = {}
+
+    bucket_counts = []
+    for label, lo, hi in _MKT_CAP_BUCKETS:
+        c = sum(1 for mc in mkt_caps_sorted if mc >= lo and mc < hi)
+        bucket_counts.append((label, c))
+
+    return {
+        "n": n,
+        "composition": composition,
+        "sectors": sector_rows,
+        "industries": industry_rows,
+        "market_cap": mc_stats,
+        "buckets": bucket_counts,
+    }
+
+
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
         description="Rank the universe from cached data. Default: no network."
@@ -88,6 +172,14 @@ def parse_args(argv=None):
         "--limit", type=int, default=100, metavar="N",
         help="Cap the report at the top N composite-ranked stocks (default 100). "
              "Set to 0 to render the full universe.",
+    )
+    p.add_argument(
+        "--exclude-adr", action="store_true",
+        help="Drop ADR-labeled tickers before z-scoring/ranking (Universe filter).",
+    )
+    p.add_argument(
+        "--exclude-reit", action="store_true",
+        help="Drop REIT-labeled tickers before z-scoring/ranking (Universe filter).",
     )
     return p.parse_args(argv)
 
@@ -125,13 +217,50 @@ def main():
     # be empty and only ticker-suffix patterns will fire — once profiles are
     # cached, the next run filters cleanly.
     profiles_data = store.profiles()
-    tickers, excluded, labels = classify_universe(raw_tickers, profiles_data)
+    eligible_tickers, excluded, labels = classify_universe(raw_tickers, profiles_data)
     print(
-        f"Eligible: {len(tickers)} (excluded {len(excluded)}: "
+        f"Eligible: {len(eligible_tickers)} (excluded {len(excluded)}: "
         + ", ".join(sorted({exclusion_reason_label(r) for r in excluded.values()}))
         + ")"
-        if excluded else f"Eligible: {len(tickers)}"
+        if excluded else f"Eligible: {len(eligible_tickers)}"
     )
+
+    # Apply user-controlled active filters AFTER hygiene but BEFORE the
+    # pipeline runs, so cross-sectional z-scores, composite, ranks, and
+    # weights all recompute over the active set.
+    active_filters: dict = {
+        "exclude_adr": bool(args.exclude_adr),
+        "exclude_reit": bool(args.exclude_reit),
+        "removed_by_filter": [],
+        "removed_count": 0,
+    }
+    tickers = list(eligible_tickers)
+    if args.exclude_adr or args.exclude_reit:
+        kept: list[str] = []
+        removed: list[tuple[str, str]] = []
+        for t in tickers:
+            tags = labels.get(t) or []
+            if args.exclude_adr and "ADR" in tags:
+                removed.append((t, "ADR"))
+                continue
+            if args.exclude_reit and "REIT" in tags:
+                removed.append((t, "REIT"))
+                continue
+            kept.append(t)
+        tickers = kept
+        active_filters["removed_by_filter"] = removed
+        active_filters["removed_count"] = len(removed)
+        active_summary = ", ".join(
+            x for x in (
+                "exclude ADRs" if args.exclude_adr else "",
+                "exclude REITs" if args.exclude_reit else "",
+            ) if x
+        )
+        print(
+            f"Active filters ({active_summary}): "
+            f"{len(eligible_tickers)} → {len(tickers)} "
+            f"({len(removed)} removed)"
+        )
 
     ts = ticker_to_sector(profiles_data)
     # Restrict the sector map to eligible tickers so the pipeline never
@@ -232,9 +361,14 @@ def main():
     factors_used["sort"] = args.sort
     factors_used["universe_total"] = len(ranked)
     factors_used["universe_raw_count"] = len(raw_tickers)
-    factors_used["universe_eligible_count"] = len(tickers)
+    factors_used["universe_eligible_count"] = len(eligible_tickers)
+    factors_used["universe_active_count"] = len(tickers)
     factors_used["universe_excluded"] = excluded
     factors_used["universe_labels"] = labels
+    factors_used["universe_active_filters"] = active_filters
+    factors_used["universe_pulse"] = _build_universe_pulse(
+        tickers, profiles_data, labels, ranked,
+    )
     excluded_by_reason: dict[str, list[str]] = {}
     for _t, _reason in excluded.items():
         excluded_by_reason.setdefault(exclusion_reason_label(_reason), []).append(_t)
