@@ -392,6 +392,11 @@ svg.mini-spark {
   font-size: 12px; color: var(--text-muted);
   display: flex; align-items: baseline; gap: 5px;
   min-width: 0;
+  /* Clip overflow so the sector / ADR tag never bleeds into the
+     sparkline column on narrow iPhone widths — fixes the visual
+     "Communication Services+1.79σ" run-together. */
+  overflow: hidden;
+  padding-right: 6px;
 }
 .meta .name {
   flex: 0 1 auto; min-width: 0;
@@ -399,7 +404,12 @@ svg.mini-spark {
   color: var(--text);
 }
 .meta .dot { flex: 0 0 auto; opacity: 0.45; }
-.meta .sector { flex: 0 0 auto; white-space: nowrap; }
+.meta .sector {
+  /* Allow the sector to shrink with ellipsis when the row is tight,
+     so it never collides with the σ value to its right. */
+  flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .meta .tags { flex: 0 0 auto; display: inline-flex; gap: 3px; margin-left: 3px; }
 .meta .tag {
   font-size: 9px; font-weight: 600;

@@ -218,22 +218,73 @@ def audit(
         if t not in stock_resid_columns:
             sec = (prof.get("sector") or "").strip() if prof else ""
             sec_etf = sector_etf_map.get(sec) if sec else None
-            if not sec:
-                source = "missing_sector_for_residual"
+            # Tease apart the four distinct reasons residualisation can
+            # silently drop a name. The collapsed "missing_sector_for_residual"
+            # used to be misleading whenever a profile was simply not in the
+            # cache at all (action there is "refresh", not "fix the ETF map").
+            if not prof:
+                source = "no_profile_cached"
+                detail = (
+                    "No FMP profile cached, so the residualiser can't "
+                    "look up a sector ETF for this ticker"
+                )
+                action = (
+                    "re-run with --update (or --refresh) to fetch the "
+                    "profile; sector ETF map is fine, the issue is the "
+                    "missing profile"
+                )
+            elif not sec:
+                source = "profile_missing_sector_field"
+                detail = (
+                    "Profile is cached but its sector field is empty, "
+                    "so no ETF proxy can be picked for residualisation"
+                )
+                action = (
+                    "verify FMP coverage for this ticker; if it returns "
+                    "a sector now, re-run with --update to refresh the "
+                    "profile cache"
+                )
             elif not sec_etf:
                 source = f"no_etf_proxy_for_sector_{sec}"
+                detail = (
+                    f"Sector '{sec}' has no entry in "
+                    f"data/sector_etf_map.json"
+                )
+                action = (
+                    f"add a '{sec}' → ETF mapping in "
+                    f"data/sector_etf_map.json; only then can this "
+                    f"ticker be residualised"
+                )
+            elif n_days < REQUIRED_HISTORY_DAYS:
+                source = "insufficient_price_history"
+                detail = (
+                    f"Sector ETF mapped ({sec_etf}) but only "
+                    f"{n_days} days of price history "
+                    f"(< {REQUIRED_HISTORY_DAYS} required)"
+                )
+                action = (
+                    "wait for more history or re-run with --update; "
+                    "momentum will fall back to NaN until then"
+                )
             else:
-                source = "insufficient_history_or_data"
+                source = "residual_regression_failed"
+                detail = (
+                    f"Sector ETF mapped ({sec_etf}) and history is "
+                    f"sufficient, but the residual regression still "
+                    f"produced no series — usually a price-data gap "
+                    f"that doesn't overlap the regression window"
+                )
+                action = (
+                    "re-run with --update to top up prices; if the "
+                    "issue persists, inspect the cached price series "
+                    "for this ticker"
+                )
             issues.append(_make(
                 "residual_skipped",
-                detail="Stock has no residual return series",
+                detail=detail,
                 calc="momentum, HRP weighting",
                 source=source,
-                action=(
-                    "wait for history or use --update; momentum will fall "
-                    "back to NaN" if "history" in source
-                    else "ensure sector/ETF mapping is configured"
-                ),
+                action=action,
             ))
 
         if t in ranked.index:
