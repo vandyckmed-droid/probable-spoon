@@ -4,3 +4,16 @@ cache/
 reports/
 snapshots/
 .pytest_cache/
+
+# User secrets — never commit. The real key lives in secrets/fmp_key
+# (this dir). The .example template IS tracked as a setup hint.
+secrets/*
+!secrets/*.example
+
+# User-specific universe definition. The repo ships
+# data/universe_extra.txt.example as a starter; your real universe
+# lives in data/universe_extra.txt and data/universe.json so a branch
+# switch never wipes it. data/sector_etf_map.json IS tracked because
+# it's shared config.
+data/universe.json
+data/universe_extra.txt

@@ -1,13 +1,27 @@
-# =====================================================================
-# PASTE YOUR FMP API KEY BETWEEN THE QUOTES BELOW.
-# Get a key at https://financialmodelingprep.com/developer
-# =====================================================================
-FMP_API_KEY = ""
-# =====================================================================
-
 import os
-if not FMP_API_KEY:
-    FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+from pathlib import Path
+
+# FMP API key. Resolution order:
+#   1. FMP_API_KEY env var
+#   2. secrets/fmp_key (single line, key only — gitignored)
+# This file is tracked in git, so we never store the literal key here;
+# see secrets/fmp_key.example for the format.
+def _load_fmp_key() -> str:
+    env = os.environ.get("FMP_API_KEY", "").strip()
+    if env:
+        return env
+    secrets_path = Path(__file__).resolve().parent / "secrets" / "fmp_key"
+    if not secrets_path.exists():
+        return ""
+    # First non-blank, non-comment line. Forgives users who copy the
+    # .example file wholesale without stripping the header notes.
+    for line in secrets_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return ""
+
+FMP_API_KEY = _load_fmp_key()
 
 
 # Pipeline

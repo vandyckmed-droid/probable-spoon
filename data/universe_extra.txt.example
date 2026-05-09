@@ -1,0 +1,44 @@
+# Starter universe. Copy this file to data/universe_extra.txt and edit
+# in place — the real file is gitignored so a branch switch never
+# wipes your local list. One ticker per line, blank lines and
+# everything after `#` are ignored. Use expand.py to grow the list
+# from FMP's screener once your API key is set.
+NVDA
+GOOGL
+GOOG
+AAPL
+MSFT
+AMZN
+TSM
+AVGO
+META
+TSLA
+WMT
+BRK-A
+BRK-B
+LLY
+JPM
+MU
+AMD
+XOM
+V
+ASML
+INTC
+ORCL
+JNJ
+COST
+MA
+CAT
+BAC
+NFLX
+LRCX
+CVX
+ABBV
+CSCO
+PG
+KO
+AMAT
+UNH
+BABA
+HD
+GE
