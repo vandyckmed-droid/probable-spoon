@@ -379,9 +379,8 @@ svg.mini-spark {
   font-size: 10px; font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+  /* Colour comes from an inline rgb() gradient on the element itself. */
 }
-.mini-pct.up   { color: var(--accent-up); }
-.mini-pct.down { color: var(--accent-down); }
 
 .meta {
   grid-row: 2; grid-column: 2;
@@ -588,13 +587,23 @@ svg.resid-chart {
 .factors .contrib .w {
   color: var(--text-faint); font-weight: 400; margin-left: 6px;
 }
-/* Z-score colour buckets — same thresholds as the composite pill so the
-   factor σ readouts and the pill stay in sync visually. */
-.factors .z.up-strong   { color: var(--accent-up); }
-.factors .z.up-light    { color: var(--accent-up); opacity: 0.78; }
-.factors .z.down-strong { color: var(--accent-down); }
-.factors .z.down-light  { color: var(--accent-down); opacity: 0.78; }
-.factors .z.flat        { color: var(--text-muted); }
+/* Factor z cells take their colour from an inline rgb() gradient
+   (interpolated by |z|) so neighbouring rows show subtly different shades
+   instead of snapping into three buckets. The composite pill keeps its own
+   bucket palette below. */
+
+/* Leading factor: subtle emphasis. A small caret before the label and a
+   slight font-weight bump on the contribution column — enough to draw
+   the eye without shouting. */
+.factors .label.leader { font-weight: 600; }
+.factors .label.leader::before {
+  content: "›";
+  margin-right: 6px;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+.factors .contrib.leader { font-weight: 600; }
+.factors .z.leader { font-weight: 600; }
 .factors .total .label,
 .factors .total .contrib {
   font-weight: 700;
@@ -983,12 +992,30 @@ def _explain(mom_z, qual_z, val_z) -> str:
     return f"{parts[0].capitalize()}, {parts[1]}, and {parts[2]}."
 
 
-def _factor_row(label: str, weight, z) -> str:
-    z_html = _fmt_z(z)
+def _z_gradient_color(z) -> str:
+    """Interpolate z → rgb between coral (#f87171), neutral grey (#9aa0a6),
+    and emerald (#34d399). Saturation reaches the endpoint colour at |z|≥2;
+    smaller magnitudes desaturate toward grey so small differences read as
+    small visual differences instead of snapping into one of three buckets."""
     if z is None or pd.isna(z):
-        z_cls = "flat"
+        return ""
+    z = max(-2.0, min(2.0, float(z)))
+    intensity = abs(z) / 2.0
+    if z >= 0:
+        r = round(154 + (52 - 154) * intensity)
+        g = round(160 + (211 - 160) * intensity)
+        b = round(166 + (153 - 166) * intensity)
     else:
-        z_cls = _pill_class(float(z))
+        r = round(154 + (248 - 154) * intensity)
+        g = round(160 + (113 - 160) * intensity)
+        b = round(166 + (113 - 166) * intensity)
+    return f"rgb({r},{g},{b})"
+
+
+def _factor_row(label: str, weight, z, leader: bool = False) -> str:
+    z_html = _fmt_z(z)
+    color = _z_gradient_color(z) if (z is not None and not pd.isna(z)) else ""
+    z_style = f' style="color:{color}"' if color else ""
     if weight is None or weight == 0:
         contrib = '<span class="muted">excluded</span>'
         weight_html = ""
@@ -998,10 +1025,11 @@ def _factor_row(label: str, weight, z) -> str:
         else:
             contrib = f"{z * weight:+.3f}"
         weight_html = f'<span class="w">{int(round(weight*100))}%</span>'
+    lead_cls = " leader" if leader else ""
     return (
-        f'<div class="label">{label}</div>'
-        f'<div class="z {z_cls}">{z_html}</div>'
-        f'<div class="contrib">{contrib} {weight_html}</div>'
+        f'<div class="label{lead_cls}">{label}</div>'
+        f'<div class="z{lead_cls}"{z_style}>{z_html}</div>'
+        f'<div class="contrib{lead_cls}">{contrib} {weight_html}</div>'
     )
 
 
@@ -1252,10 +1280,19 @@ def _row_html(
     qual_z = row.get("quality_z")
     val_z = row.get("value_z")
     total_cls = _pill_class(composite) if composite is not None else "flat"
+    # Leading factor = largest absolute contribution to the composite (z·w).
+    # Falls back to None if no factor has finite z and a non-zero weight.
+    _candidates = []
+    for _key, _z in (("momentum", mom_z), ("quality", qual_z), ("value", val_z)):
+        _w = weights.get(_key) or 0
+        if _z is None or pd.isna(_z) or _w <= 0:
+            continue
+        _candidates.append((_key, abs(float(_z) * _w)))
+    leader_key = max(_candidates, key=lambda x: x[1])[0] if _candidates else None
     factor_rows = (
-        _factor_row("Momentum", weights.get("momentum"), mom_z)
-        + _factor_row("Quality", weights.get("quality"), qual_z)
-        + _factor_row("Value", weights.get("value"), val_z)
+        _factor_row("Momentum", weights.get("momentum"), mom_z, leader=(leader_key == "momentum"))
+        + _factor_row("Quality", weights.get("quality"), qual_z, leader=(leader_key == "quality"))
+        + _factor_row("Value", weights.get("value"), val_z, leader=(leader_key == "value"))
         + (
             '<div class="label total">Composite</div>'
             '<div class="z total"></div>'
@@ -1292,9 +1329,10 @@ def _row_html(
     if chart_series:
         mini_spark_html = _mini_residual_svg(chart_series, grad_id=f"mg_{safe_id}")
         cur_sig = float(current_m6) if current_m6 is not None else 0.0
-        pct_cls = "up" if cur_sig >= 0 else "down"
+        mini_color = _z_gradient_color(cur_sig)
+        mini_style = f' style="color:{mini_color}"' if mini_color else ""
         mini_pct_html = (
-            f'<span class="mini-pct {pct_cls}">{cur_sig:+.2f}σ</span>'
+            f'<span class="mini-pct"{mini_style}>{cur_sig:+.2f}σ</span>'
         )
     else:
         mini_spark_html = ""
@@ -1345,9 +1383,10 @@ def _row_html(
                 f'<div class="resid-axis-zero">0σ</div>'
                 f'{svg}'
                 '</div>'
-                '<p class="resid-desc">Rolling 6-1 residual momentum sleeve '
-                '(126d lookback, 21d skip, divided by 63d residual σ) — '
-                'endpoint equals the momentum composite\'s m6 input.'
+                '<p class="resid-desc">Rolling 6-1 residual momentum sleeve, '
+                'σ-normalised by the cumulative-window standard error '
+                '(63d residual σ × √105). '
+                'Endpoint equals the momentum composite\'s m6 input.'
                 + (
                     f' <span class="resid-ema">· EMA({int(diag.get("ema_span") or 1)})</span>'
                     if int(diag.get("ema_span") or 1) > 1 else ''

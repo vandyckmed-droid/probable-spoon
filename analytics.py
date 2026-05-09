@@ -126,17 +126,30 @@ def compute_residual_momentum(
     """Risk-adjusted residual momentum sleeves, cross-sectional z, 50/50 composite.
 
     For each ticker:
-      momentum_12_1 = sum(resid[-MOM_LONG_DAYS:-MOM_SKIP_DAYS])
-      momentum_6_1  = sum(resid[-MOM_SHORT_DAYS:-MOM_SKIP_DAYS])
-      sigma_63      = std(resid[-SIGMA_DAYS:], ddof=0), floored at SIGMA_FLOOR  (no skip, not annualised)
-      m12_raw       = momentum_12_1 / sigma_63
-      m6_raw        = momentum_6_1  / sigma_63
-      m1_raw        = sum(resid[-MOM_REV_DAYS:]) / sigma_63   # diagnostic only
+      sigma_d       = std(resid[-SIGMA_DAYS:], ddof=0), floored at SIGMA_FLOOR.
+      m12_raw       = sum(resid[-MOM_LONG_DAYS:-MOM_SKIP_DAYS])
+                       / (sigma_d * sqrt(MOM_LONG_DAYS - MOM_SKIP_DAYS))
+      m6_raw        = sum(resid[-MOM_SHORT_DAYS:-MOM_SKIP_DAYS])
+                       / (sigma_d * sqrt(MOM_SHORT_DAYS - MOM_SKIP_DAYS))
+      m1_raw        = sum(resid[-MOM_REV_DAYS:])
+                       / (sigma_d * sqrt(MOM_REV_DAYS))   # diagnostic only
+
+    Each cumulative window is divided by its own iid-implied standard error
+    (sigma_d * sqrt(K)), so the raw values read as proper σ on the cumulative
+    move. The cross-sectional z below is invariant to a constant scaling, so
+    rankings/composites are mathematically unchanged versus the previous
+    sigma_d-only divisor.
 
     Each sleeve is then winsorized + z-scored across the universe, combined
     50/50, and z-scored once more.
     """
     rows: dict[str, dict] = {}
+    long_window = MOM_LONG_DAYS - MOM_SKIP_DAYS
+    short_window = MOM_SHORT_DAYS - MOM_SKIP_DAYS
+    rev_window = MOM_REV_DAYS
+    sqrt_long = float(np.sqrt(long_window))
+    sqrt_short = float(np.sqrt(short_window))
+    sqrt_rev = float(np.sqrt(rev_window))
     for ticker in stock_residuals.columns:
         s = stock_residuals[ticker].dropna()
         n = len(s)
@@ -149,15 +162,15 @@ def compute_residual_momentum(
             continue
         sigma = max(float(np.std(arr[-SIGMA_DAYS:], ddof=0)), SIGMA_FLOOR)
         m12 = (
-            float(np.sum(arr[-MOM_LONG_DAYS:-MOM_SKIP_DAYS])) / sigma
+            float(np.sum(arr[-MOM_LONG_DAYS:-MOM_SKIP_DAYS])) / (sigma * sqrt_long)
             if n >= MOM_LONG_DAYS else float("nan")
         )
         m6 = (
-            float(np.sum(arr[-MOM_SHORT_DAYS:-MOM_SKIP_DAYS])) / sigma
+            float(np.sum(arr[-MOM_SHORT_DAYS:-MOM_SKIP_DAYS])) / (sigma * sqrt_short)
             if n >= MOM_SHORT_DAYS else float("nan")
         )
         m1 = (
-            float(np.sum(arr[-MOM_REV_DAYS:])) / sigma
+            float(np.sum(arr[-MOM_REV_DAYS:])) / (sigma * sqrt_rev)
             if n >= MOM_REV_DAYS else float("nan")
         )
         rows[ticker] = {
@@ -190,10 +203,11 @@ def compute_diagnostics(
     date `e` the value is
 
         sum(resid[e - MOM_SHORT_DAYS + 1 : e - MOM_SKIP_DAYS + 1])
-            / max(std(resid[e - SIGMA_DAYS + 1 : e + 1], ddof=0), SIGMA_FLOOR)
+            / (max(std(resid[e - SIGMA_DAYS + 1 : e + 1], ddof=0), SIGMA_FLOOR)
+               * sqrt(MOM_SHORT_DAYS - MOM_SKIP_DAYS))
 
     so the endpoint matches `m6_raw` in `compute_residual_momentum` exactly.
-    Values are in σ units (residual std) — no separate sigma reading needed.
+    Values are in proper σ units (cumulative-move standard errors).
 
     Returns a dict keyed by ticker with:
         chart_m6:    [floats], the rolling sigma-scaled 6-1 series
@@ -209,6 +223,7 @@ def compute_diagnostics(
         return out
     ema_span = max(1, int(CHART_EMA_SPAN))
     sum_window = MOM_SHORT_DAYS - MOM_SKIP_DAYS
+    sqrt_window = float(np.sqrt(sum_window))
     for t in tickers:
         if t not in stock_residuals.columns:
             continue
@@ -223,7 +238,7 @@ def compute_diagnostics(
         rolling_sigma = (
             s.rolling(SIGMA_DAYS).std(ddof=0).clip(lower=SIGMA_FLOOR)
         )
-        m6_series = (rolling_sum / rolling_sigma).dropna()
+        m6_series = (rolling_sum / (rolling_sigma * sqrt_window)).dropna()
         if m6_series.empty:
             continue
         # Very gentle EMA on the chart so day-to-day noise does not zigzag a
