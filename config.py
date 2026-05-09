@@ -42,8 +42,8 @@ Q_NETDEBT_W   = 0.30
 
 # Value sub-components (sum to 1 within value)
 V_EBIT_EV_W = 0.40
-V_FCF_EV_W  = 0.60
-V_BP_W      = 0.00   # deprecated, kept for diagnostics
+V_FCF_EV_W  = 0.40
+V_BP_W      = 0.20
 
 # Coverage fallbacks
 QUALITY_FALLBACK_THRESHOLD = 0.40

@@ -8,7 +8,7 @@ from config import (
     SIGMA_DAYS, SIGMA_FLOOR,
     WINSOR_LOWER, WINSOR_UPPER,
     Q_GP_W, Q_GP_CHANGE_W, Q_NETDEBT_W,
-    V_EBIT_EV_W, V_FCF_EV_W,
+    V_EBIT_EV_W, V_FCF_EV_W, V_BP_W,
     W_MOMENTUM, W_QUALITY, W_VALUE,
     QUALITY_FALLBACK_THRESHOLD, VALUE_FALLBACK_THRESHOLD,
     MIN_SECTOR_SIZE,
@@ -318,6 +318,7 @@ def compute_value(
     df["value_raw"] = (
         V_EBIT_EV_W * df["ebit_ev_z"].fillna(0)
         + V_FCF_EV_W * df["fcf_ev_z"].fillna(0)
+        + V_BP_W * df["book_mc_z"].fillna(0)
     )
     df["value_z"] = _zscore(_winsorize(df["value_raw"]))
     coverage = df["value_z"].notna().sum() / len(funds) if funds else 0.0
