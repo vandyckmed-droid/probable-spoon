@@ -10,7 +10,6 @@ from config import (
     Q_GP_W, Q_GP_CHANGE_W, Q_NETDEBT_W,
     V_EBIT_EV_W, V_FCF_EV_W, V_BP_W,
     W_MOMENTUM, W_QUALITY, W_VALUE,
-    QUALITY_FALLBACK_THRESHOLD, VALUE_FALLBACK_THRESHOLD,
     INDUSTRY_MIN_SIZE, MIN_SECTOR_SIZE,
     EXP_GROWTH_W, EXP_SURPRISE_W,
 )
@@ -361,52 +360,97 @@ def compute_quality(
     ticker_sector: dict[str, str],
     ticker_industry: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
-    """Industry-then-sector-then-universe relative z on quality components,
-    plus a universe-wide z on the weighted composite so quality_z is
-    comparable to momentum_z. `ticker_industry` is optional for backwards
-    compatibility; when omitted the normaliser collapses to sector-then-
-    universe (the prior behaviour)."""
+    """Strict complete-data Quality score.
+
+    A ticker receives a quality_z only when every required input is
+    present and usable: gross profit, total assets (positive), prior-year
+    gross profit and total assets (for the YoY change), total debt, and
+    cash. Any missing or invalid input excludes the ticker — there is no
+    zero-fill, no component dampening, and no per-stock weight
+    renormalisation. Excluded tickers are returned in meta['excluded']
+    keyed by ticker with a list of human-readable reasons so the report
+    can surface them.
+
+    Components (all required):
+      gross_profitability   = grossProfit_t / totalAssets_t
+      gp_change             = gross_profitability_t − gross_profitability_{t-1}
+      balance_sheet_quality = −(totalDebt − cash) / totalAssets
+
+    Each component is winsorised + z-scored within its industry (with
+    sector / universe fall-backs for bucket size only — that hierarchy
+    selects the reference distribution, it does not paper over missing
+    data). The weighted composite is winsorised + z-scored across the
+    universe so the final quality_z lives on the momentum_z scale.
+
+    `ticker_industry` is optional; when omitted the normaliser collapses
+    to sector-then-universe.
+    """
     ti = ticker_industry or {}
     rows: dict[str, dict] = {}
-    for ticker, data in funds.items():
-        if ticker not in ticker_sector:
-            continue
+    excluded: dict[str, list[str]] = {}
+    n_active = len(ticker_sector) if ticker_sector else 0
+    for ticker in ticker_sector:
+        data = funds.get(ticker) or {}
         income = data.get("income") or []
         balance = data.get("balance") or []
-        if not income or not balance:
+        if not income:
+            excluded[ticker] = ["missing income statement"]
+            continue
+        if not balance:
+            excluded[ticker] = ["missing balance sheet"]
             continue
         inc_t = income[0]
         bal_t = balance[0]
         ta_t = bal_t.get("totalAssets")
-        if not ta_t or ta_t <= 0:
-            continue
         gp_t = inc_t.get("grossProfit")
         debt_t = bal_t.get("totalDebt")
         cash_t = bal_t.get("cashAndCashEquivalents")
         if cash_t is None:
             cash_t = bal_t.get("cashAndShortTermInvestments")
-        gp_ratio = (gp_t / ta_t) if gp_t is not None else float("nan")
-        gp_change = float("nan")
+        # Prior-year inputs for gp_change. Both years must be present and the
+        # prior denominator positive — otherwise gp_change is uncomputable
+        # and the ticker is excluded outright.
+        gp_t1 = None
+        ta_t1 = None
         if len(income) > 1 and len(balance) > 1:
             gp_t1 = income[1].get("grossProfit")
             ta_t1 = balance[1].get("totalAssets")
-            if gp_t is not None and gp_t1 is not None and ta_t1 and ta_t1 > 0:
-                gp_change = (gp_t / ta_t) - (gp_t1 / ta_t1)
-        if debt_t is not None and cash_t is not None:
-            bsq = -(debt_t - cash_t) / ta_t
-        else:
-            bsq = float("nan")
-        if pd.isna(gp_ratio) and pd.isna(bsq):
+
+        reasons: list[str] = []
+        if ta_t is None or ta_t <= 0:
+            reasons.append("missing or non-positive total assets")
+        if gp_t is None:
+            reasons.append("missing gross profit")
+        if debt_t is None:
+            reasons.append("missing total debt")
+        if cash_t is None:
+            reasons.append("missing cash")
+        if gp_t1 is None or ta_t1 is None or ta_t1 <= 0:
+            reasons.append("missing YoY gross-profitability change")
+        if reasons:
+            excluded[ticker] = reasons
             continue
+
         rows[ticker] = {
             "sector": ticker_sector.get(ticker, "Unknown"),
             "industry": ti.get(ticker, "Unknown"),
-            "gross_profitability": gp_ratio,
-            "gp_change": gp_change,
-            "balance_sheet_quality": bsq,
+            "gross_profitability": gp_t / ta_t,
+            "gp_change": (gp_t / ta_t) - (gp_t1 / ta_t1),
+            "balance_sheet_quality": -(debt_t - cash_t) / ta_t,
         }
+
+    cols = ["sector", "industry",
+            "gross_profitability", "gp_change", "balance_sheet_quality",
+            "gp_z", "gp_change_z", "nd_z", "quality_scope",
+            "quality_raw", "quality_z"]
     if not rows:
-        return pd.DataFrame(), {"coverage": 0.0}
+        empty = pd.DataFrame(columns=cols)
+        return empty, {
+            "coverage": 0.0, "excluded": excluded,
+            "n_eligible": 0, "n_excluded": len(excluded),
+            "n_active": n_active,
+        }
+
     df = pd.DataFrame.from_dict(rows, orient="index")
     industries = df["industry"]
     sectors = df["sector"]
@@ -420,18 +464,33 @@ def compute_quality(
         df["balance_sheet_quality"], industries, sectors,
     )
     df["quality_scope"] = _aggregate_scope([gp_scope, gpc_scope, nd_scope])
-    df["quality_raw"] = (
-        Q_GP_W * df["gp_z"].fillna(0)
-        + Q_GP_CHANGE_W * df["gp_change_z"].fillna(0)
-        + Q_NETDEBT_W * df["nd_z"].fillna(0)
-    )
-    df["quality_z"] = _zscore(_winsorize(df["quality_raw"]))
-    coverage = df["quality_z"].notna().sum() / len(funds) if funds else 0.0
-    cols = ["sector", "industry",
-            "gross_profitability", "gp_change", "balance_sheet_quality",
-            "gp_z", "gp_change_z", "nd_z", "quality_scope",
-            "quality_raw", "quality_z"]
-    return df[cols], {"coverage": float(coverage)}
+    # Strict: all three component z-scores must be finite. No fillna(0).
+    complete = df[["gp_z", "gp_change_z", "nd_z"]].notna().all(axis=1)
+    df["quality_raw"] = float("nan")
+    if complete.any():
+        df.loc[complete, "quality_raw"] = (
+            Q_GP_W * df.loc[complete, "gp_z"]
+            + Q_GP_CHANGE_W * df.loc[complete, "gp_change_z"]
+            + Q_NETDEBT_W * df.loc[complete, "nd_z"]
+        )
+    df["quality_z"] = float("nan")
+    raw = df["quality_raw"].dropna()
+    if not raw.empty:
+        df.loc[raw.index, "quality_z"] = _zscore(_winsorize(raw))
+    # Any row that still has NaN quality_z (e.g. degenerate single-bucket
+    # universe where _zscore collapses) is recorded as excluded so the
+    # downstream pipeline does not silently rank with a missing factor.
+    for t in df.index[df["quality_z"].isna()]:
+        excluded.setdefault(t, []).append("uncomputable quality z-score")
+    eligible_df = df.loc[df["quality_z"].notna(), cols].copy()
+    coverage = (len(eligible_df) / n_active) if n_active else 0.0
+    return eligible_df, {
+        "coverage": float(coverage),
+        "excluded": excluded,
+        "n_eligible": int(len(eligible_df)),
+        "n_excluded": int(len(excluded)),
+        "n_active": int(n_active),
+    }
 
 
 def compute_value(
@@ -440,54 +499,118 @@ def compute_value(
     ticker_sector: dict[str, str],
     ticker_industry: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
-    """Industry-then-sector-then-universe relative z on value components,
-    plus a universe-wide z on the weighted composite so value_z is
-    comparable to momentum_z. `ticker_industry` is optional for backwards
-    compatibility."""
+    """Strict complete-data Value score.
+
+    A ticker receives a value_z only when every required input is present
+    and usable: latest close, share count, total debt, cash, EBIT (or
+    operatingIncome), free cash flow, stockholders' equity, and a
+    positive enterprise value. Any missing or invalid input excludes the
+    ticker — there is no zero-fill, no component dampening, and no
+    per-stock weight renormalisation. Excluded tickers are returned in
+    meta['excluded'] keyed by ticker with a list of human-readable
+    reasons so the report can surface them.
+
+    Components (all required):
+      ebit_ev = EBIT / EnterpriseValue
+      fcf_ev  = FreeCashFlow / EnterpriseValue
+      book_mc = StockholdersEquity / MarketCap
+    where EnterpriseValue = MarketCap + TotalDebt − Cash.
+
+    Each component is winsorised + z-scored within its industry (with
+    sector / universe fall-backs for bucket size only). The weighted
+    composite is winsorised + z-scored across the universe so the final
+    value_z lives on the momentum_z scale.
+    """
     ti = ticker_industry or {}
     rows: dict[str, dict] = {}
-    for ticker, data in funds.items():
-        if ticker not in ticker_sector:
-            continue
+    excluded: dict[str, list[str]] = {}
+    n_active = len(ticker_sector) if ticker_sector else 0
+    for ticker in ticker_sector:
+        data = funds.get(ticker) or {}
         income = data.get("income") or []
         balance = data.get("balance") or []
         cashflow = data.get("cashflow") or []
-        if not income or not balance:
+        if not income:
+            excluded[ticker] = ["missing income statement"]
+            continue
+        if not balance:
+            excluded[ticker] = ["missing balance sheet"]
+            continue
+        if not cashflow:
+            excluded[ticker] = ["missing cash flow statement"]
             continue
         if ticker not in prices.columns:
+            excluded[ticker] = ["missing price series"]
             continue
         price_series = prices[ticker].dropna()
         if price_series.empty:
+            excluded[ticker] = ["empty price history"]
             continue
         latest_close = float(price_series.iloc[-1])
+
         inc_t = income[0]
         bal_t = balance[0]
         cf_t = cashflow[0] if cashflow else {}
         shares = inc_t.get("weightedAverageShsOutDil")
-        if not shares or shares <= 0 or latest_close <= 0:
-            continue
-        market_cap = latest_close * shares
-        debt = bal_t.get("totalDebt") or 0
-        cash = bal_t.get("cashAndCashEquivalents") or 0
-        ev = market_cap + debt - cash
-        if ev <= 0:
-            continue
+        debt = bal_t.get("totalDebt")
+        cash = bal_t.get("cashAndCashEquivalents")
+        if cash is None:
+            cash = bal_t.get("cashAndShortTermInvestments")
         ebit = inc_t.get("ebit")
         if ebit is None:
             ebit = inc_t.get("operatingIncome")
-        fcf = cf_t.get("freeCashFlow")
+        fcf = cf_t.get("freeCashFlow") if cf_t else None
         equity = bal_t.get("totalStockholdersEquity")
-        ebit_ev = (ebit / ev) if ebit is not None else float("nan")
-        fcf_ev = (fcf / ev) if fcf is not None else float("nan")
-        book_mc = (equity / market_cap) if equity is not None else float("nan")
+
+        reasons: list[str] = []
+        if shares is None or shares <= 0:
+            reasons.append("missing or non-positive share count")
+        if latest_close <= 0:
+            reasons.append("invalid latest close")
+        if debt is None:
+            reasons.append("missing total debt")
+        if cash is None:
+            reasons.append("missing cash")
+        if ebit is None:
+            reasons.append("missing EBIT / operating income")
+        if fcf is None:
+            reasons.append("missing free cash flow")
+        if equity is None:
+            reasons.append("missing stockholders' equity")
+        if reasons:
+            excluded[ticker] = reasons
+            continue
+
+        market_cap = latest_close * shares
+        ev = market_cap + debt - cash
+        if ev <= 0:
+            excluded[ticker] = ["non-positive enterprise value"]
+            continue
+        if market_cap <= 0:
+            excluded[ticker] = ["non-positive market cap"]
+            continue
+
         rows[ticker] = {
             "sector": ticker_sector.get(ticker, "Unknown"),
             "industry": ti.get(ticker, "Unknown"),
             "market_cap": market_cap,
-            "ebit_ev": ebit_ev, "fcf_ev": fcf_ev, "book_mc": book_mc,
+            "ebit_ev": ebit / ev,
+            "fcf_ev": fcf / ev,
+            "book_mc": equity / market_cap,
         }
+
+    cols = ["sector", "industry", "market_cap",
+            "ebit_ev", "fcf_ev", "book_mc",
+            "ebit_ev_z", "fcf_ev_z", "book_mc_z", "value_scope",
+            "value_raw", "value_z"]
     if not rows:
-        return pd.DataFrame(), {"coverage": 0.0}
+        empty = pd.DataFrame(columns=cols)
+        return empty, {
+            "coverage": 0.0, "excluded": excluded,
+            "n_eligible": 0, "n_excluded": len(excluded),
+            "n_active": n_active,
+        }
+
     df = pd.DataFrame.from_dict(rows, orient="index")
     industries = df["industry"]
     sectors = df["sector"]
@@ -501,18 +624,30 @@ def compute_value(
         df["book_mc"], industries, sectors,
     )
     df["value_scope"] = _aggregate_scope([ee_scope, fe_scope, bm_scope])
-    df["value_raw"] = (
-        V_EBIT_EV_W * df["ebit_ev_z"].fillna(0)
-        + V_FCF_EV_W * df["fcf_ev_z"].fillna(0)
-        + V_BP_W * df["book_mc_z"].fillna(0)
-    )
-    df["value_z"] = _zscore(_winsorize(df["value_raw"]))
-    coverage = df["value_z"].notna().sum() / len(funds) if funds else 0.0
-    cols = ["sector", "industry", "market_cap",
-            "ebit_ev", "fcf_ev", "book_mc",
-            "ebit_ev_z", "fcf_ev_z", "book_mc_z", "value_scope",
-            "value_raw", "value_z"]
-    return df[cols], {"coverage": float(coverage)}
+    # Strict: all three component z-scores must be finite.
+    complete = df[["ebit_ev_z", "fcf_ev_z", "book_mc_z"]].notna().all(axis=1)
+    df["value_raw"] = float("nan")
+    if complete.any():
+        df.loc[complete, "value_raw"] = (
+            V_EBIT_EV_W * df.loc[complete, "ebit_ev_z"]
+            + V_FCF_EV_W * df.loc[complete, "fcf_ev_z"]
+            + V_BP_W * df.loc[complete, "book_mc_z"]
+        )
+    df["value_z"] = float("nan")
+    raw = df["value_raw"].dropna()
+    if not raw.empty:
+        df.loc[raw.index, "value_z"] = _zscore(_winsorize(raw))
+    for t in df.index[df["value_z"].isna()]:
+        excluded.setdefault(t, []).append("uncomputable value z-score")
+    eligible_df = df.loc[df["value_z"].notna(), cols].copy()
+    coverage = (len(eligible_df) / n_active) if n_active else 0.0
+    return eligible_df, {
+        "coverage": float(coverage),
+        "excluded": excluded,
+        "n_eligible": int(len(eligible_df)),
+        "n_excluded": int(len(excluded)),
+        "n_active": int(n_active),
+    }
 
 
 def compute_expectations(
@@ -633,14 +768,29 @@ def build_ranked(
     ticker_sector: dict[str, str],
     ticker_industry: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
-    """Outer-join factor frames, apply coverage fallback, compute composite/rank."""
+    """Outer-join factor frames, exclude incomplete rows, rank the eligible set.
+
+    Strict complete-data policy: a ticker is ranked only when momentum_z,
+    quality_z, and value_z are all finite. Names missing any one factor
+    are removed from the ranked frame and surfaced via
+    factors_used['composite_excluded'] = {ticker: [reasons]}. Composite
+    weights are the configured W_MOMENTUM / W_QUALITY / W_VALUE applied
+    to the eligible subset — no renormalisation, no zero-fill.
+    """
     parts = []
     for d in (mom_df, qual_df, val_df):
         if d is not None and not d.empty:
             parts.append(d.drop(columns=["sector", "industry"], errors="ignore"))
     df = pd.concat(parts, axis=1, join="outer") if parts else pd.DataFrame()
+    weights = {"momentum": W_MOMENTUM, "quality": W_QUALITY, "value": W_VALUE}
+    composite_excluded: dict[str, list[str]] = {}
+
     if df.empty:
-        return df, {"weights": {}, "quality": False, "value": False}
+        return df, {
+            "weights": weights, "quality": True, "value": True,
+            "composite_excluded": composite_excluded,
+            "n_eligible": 0, "n_composite_excluded": 0,
+        }
 
     df["sector"] = pd.Series(
         {t: ticker_sector.get(t, "Unknown") for t in df.index}
@@ -650,40 +800,61 @@ def build_ranked(
         {t: ti.get(t, "Unknown") for t in df.index}
     )
 
-    n = len(df)
-    qual_z = df["quality_z"] if "quality_z" in df.columns else pd.Series(dtype=float)
-    val_z = df["value_z"] if "value_z" in df.columns else pd.Series(dtype=float)
-    qual_coverage = qual_z.notna().sum() / n if n else 0.0
-    val_coverage = val_z.notna().sum() / n if n else 0.0
-    use_quality = qual_coverage >= QUALITY_FALLBACK_THRESHOLD
-    use_value = val_coverage >= VALUE_FALLBACK_THRESHOLD
+    mom_col = df["residual_momentum_z"] if "residual_momentum_z" in df.columns else pd.Series(np.nan, index=df.index)
+    qual_col = df["quality_z"] if "quality_z" in df.columns else pd.Series(np.nan, index=df.index)
+    val_col = df["value_z"] if "value_z" in df.columns else pd.Series(np.nan, index=df.index)
+    eligible = mom_col.notna() & qual_col.notna() & val_col.notna()
 
-    raw = {
-        "momentum": W_MOMENTUM,
-        "quality": W_QUALITY if use_quality else 0.0,
-        "value": W_VALUE if use_value else 0.0,
-    }
-    total = sum(raw.values())
-    weights = (
-        {k: v / total for k, v in raw.items() if v > 0} if total > 0 else {}
+    # Tickers that have any factor record but are missing one or more —
+    # these need to be tracked with reasons. Pure-momentum exclusions
+    # (no fundamentals at all) are tracked here too so users see why
+    # they did not appear in the ranking.
+    for t in df.index[~eligible]:
+        why: list[str] = []
+        if pd.isna(mom_col.get(t)):
+            why.append("missing momentum z (insufficient price history)")
+        if pd.isna(qual_col.get(t)):
+            why.append("missing quality z")
+        if pd.isna(val_col.get(t)):
+            why.append("missing value z")
+        composite_excluded[t] = why
+
+    eligible_df = df.loc[eligible].copy()
+    if eligible_df.empty:
+        for c in _FINAL_COLS:
+            if c not in eligible_df.columns:
+                eligible_df[c] = float("nan")
+        return eligible_df[_FINAL_COLS], {
+            "weights": weights, "quality": True, "value": True,
+            "composite_excluded": composite_excluded,
+            "n_eligible": 0,
+            "n_composite_excluded": int(len(composite_excluded)),
+        }
+
+    eligible_df["composite"] = (
+        weights["momentum"] * eligible_df["residual_momentum_z"]
+        + weights["quality"] * eligible_df["quality_z"]
+        + weights["value"] * eligible_df["value_z"]
     )
-
-    composite = pd.Series(0.0, index=df.index)
-    for k, w in weights.items():
-        col = _FACTOR_COL[k]
-        series = df[col] if col in df.columns else pd.Series(0.0, index=df.index)
-        composite = composite + w * series.fillna(0)
-    df["composite"] = composite
-    df["rank"] = df["composite"].rank(ascending=False, method="min").astype(int)
-    df["sector_rank"] = (
-        df.groupby("sector")["composite"]
+    eligible_df["rank"] = eligible_df["composite"].rank(
+        ascending=False, method="min"
+    ).astype(int)
+    eligible_df["sector_rank"] = (
+        eligible_df.groupby("sector")["composite"]
         .rank(ascending=False, method="min")
         .astype(int)
     )
 
     for c in _FINAL_COLS:
-        if c not in df.columns:
-            df[c] = float("nan")
-    df = df[_FINAL_COLS].sort_values("rank")
-    factors_used = {"weights": weights, "quality": use_quality, "value": use_value}
-    return df, factors_used
+        if c not in eligible_df.columns:
+            eligible_df[c] = float("nan")
+    eligible_df = eligible_df[_FINAL_COLS].sort_values("rank")
+    factors_used = {
+        "weights": weights,
+        "quality": True,
+        "value": True,
+        "composite_excluded": composite_excluded,
+        "n_eligible": int(len(eligible_df)),
+        "n_composite_excluded": int(len(composite_excluded)),
+    }
+    return eligible_df, factors_used

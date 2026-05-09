@@ -46,9 +46,10 @@ V_EBIT_EV_W = 0.40
 V_FCF_EV_W  = 0.40
 V_BP_W      = 0.20
 
-# Coverage fallbacks / bucket sizing
-QUALITY_FALLBACK_THRESHOLD = 0.40
-VALUE_FALLBACK_THRESHOLD   = 0.40
+# Bucket sizing for the industry → sector → universe z-score hierarchy.
+# Quality and Value enforce a strict complete-data policy — there is no
+# universe-coverage fallback at the composite level; any ticker missing
+# a required input is excluded from the ranking, not silently zero-filled.
 INDUSTRY_MIN_SIZE          = 25   # min industry bucket for industry-level z
 MIN_SECTOR_SIZE            = 5    # below this, fall back to universe-wide z
 

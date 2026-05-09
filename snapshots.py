@@ -88,13 +88,20 @@ def _build_metadata(
     excluded_summary: dict[str, int] = {}
     for _t, reason in universe_excluded.items():
         excluded_summary[reason] = excluded_summary.get(reason, 0) + 1
+    factor_excluded = fu.get("factor_excluded") or {}
+    qm = fu.get("quality_meta") or {}
+    vm = fu.get("value_meta") or {}
     return {
         "timestamp": dt.datetime.now().isoformat(timespec="seconds"),
         "strategy": getattr(config, "MQV_STRATEGY_NAME", "mqv"),
         "version": getattr(config, "MQV_VERSION", "unknown"),
         "stable": bool(getattr(config, "MQV_STABLE", False)),
         "prices_as_of": prices_as_of,
-        "weights_renormalised": fu.get("weights"),
+        # Configured composite weights. Strict complete-data policy means
+        # these are applied as-is to every ranked name; tickers missing a
+        # factor are excluded outright rather than renormalised onto the
+        # surviving weights.
+        "weights": fu.get("weights"),
         "weighting_scheme": fu.get("weighting_scheme"),
         "top_n": int(top_n),
         "cash_deployment": fu.get("cash_deployment"),
@@ -107,6 +114,15 @@ def _build_metadata(
             "active": fu.get("universe_active_count"),
             "excluded_total": sum(excluded_summary.values()),
             "excluded_by_reason": excluded_summary,
+        },
+        "factor_eligibility": {
+            "quality_eligible": qm.get("n_eligible"),
+            "quality_excluded": qm.get("n_excluded"),
+            "quality_coverage": qm.get("coverage"),
+            "value_eligible": vm.get("n_eligible"),
+            "value_excluded": vm.get("n_excluded"),
+            "value_coverage": vm.get("coverage"),
+            "composite_excluded": int(len(factor_excluded)),
         },
         "active_filters": fu.get("universe_active_filters"),
         "expectations_enabled": fu.get("expectations_enabled"),

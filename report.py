@@ -1772,46 +1772,66 @@ _METHODOLOGY_BODY = (
     'combined 50/50, and z-scored once more.</p>'
 
     '<h3>Quality</h3>'
-    '<p>Sector-relative composite of three components: '
+    '<p>Industry- (or sector-) relative composite of three components: '
     '(1) gross profitability = grossProfit / totalAssets, '
     '(2) year-over-year change in gross profitability, and '
     '(3) balance-sheet quality = −(totalDebt − cash) / totalAssets. '
-    'Each component is winsorised and z-scored within its sector and '
-    'combined 0.50 / 0.20 / 0.30. The weighted composite is then '
-    'winsorised and z-scored across the full universe so the final '
-    'Quality_z sits on the same scale as Momentum_z. Sectors with '
-    'fewer than 5 finite members fall back to a universe-wide z-score '
-    'at the component step only, so small buckets do not produce '
-    'mechanically-±1 outputs.</p>'
+    'Each component is winsorised and z-scored within its industry, '
+    'falling back to sector then universe only when a bucket is too '
+    'small to z-score reliably. The three component z-scores are then '
+    'combined 0.50 / 0.20 / 0.30 and the weighted composite is '
+    'winsorised + z-scored across the full universe so the final '
+    'Quality_z sits on the same scale as Momentum_z.</p>'
+    '<p><b>Strict complete-data policy:</b> a ticker receives a '
+    'Quality_z only when every required input is present and usable — '
+    'gross profit, total assets, prior-year gross profit and total '
+    'assets (for the YoY change), total debt, and cash. Any missing '
+    'or invalid input excludes the ticker from the ranking. The model '
+    'does not zero-fill missing components, dampen the composite, or '
+    'rebalance the surviving inputs. Excluded names are listed by '
+    'reason in the <i>Ranking eligibility</i> drawer.</p>'
 
     '<h3>Value</h3>'
-    '<p>Sector-relative composite of three multiples: EBIT/EV (40%), '
-    'FCF/EV (40%), and book/market_cap (20%). Enterprise value = '
-    'market_cap + totalDebt − cash. Each component is winsorised and '
-    'z-scored within its sector (same small-sector fallback as Quality), '
-    'then blended with the weights above. The weighted composite is '
-    'winsorised and z-scored across the full universe so Value_z is '
-    'comparable to Momentum_z and Quality_z before the MQV combine.</p>'
+    '<p>Industry- (or sector-) relative composite of three multiples: '
+    'EBIT/EV (40%), FCF/EV (40%), and book/market_cap (20%). Enterprise '
+    'value = market_cap + totalDebt − cash. Each component is '
+    'winsorised and z-scored within its industry, with the same '
+    'small-bucket fall-back to sector then universe used by Quality. '
+    'The three component z-scores are blended with the weights above, '
+    'then winsorised and z-scored across the full universe so Value_z '
+    'is comparable to Momentum_z and Quality_z before the MQV combine.</p>'
+    '<p><b>Strict complete-data policy:</b> a ticker receives a '
+    'Value_z only when every required input is present and usable — '
+    'EBIT (or operating income), free cash flow, stockholders\' equity, '
+    'share count, latest close, total debt, and cash, with a positive '
+    'enterprise value and market cap. Any missing or invalid input '
+    'excludes the ticker. No zero-fill, no per-stock weight '
+    'renormalisation. Excluded names are listed by reason in the '
+    '<i>Ranking eligibility</i> drawer.</p>'
 
     '<h3>Composite weights</h3>'
     '<p>Composite = 0.50 · Momentum + 0.30 · Quality + 0.20 · Value. '
-    'Missing factors contribute zero. If the share of the universe with a '
-    'finite Quality or Value z-score falls below 40%, that factor is dropped '
-    'and the surviving weights renormalise.</p>'
+    'A ticker is ranked only when all three z-scores are finite — '
+    'incomplete data causes transparent exclusion, not score imputation '
+    'or weight renormalisation. The full 0.50 / 0.30 / 0.20 weighting '
+    'always applies to every ranked name, and the <i>Ranking '
+    'eligibility</i> drawer lists every ticker dropped by the policy '
+    'with the specific reason(s).</p>'
 
     '<h3>Expectations <span class="exp-tag">Diagnostic</span></h3>'
-    '<p>An experimental fourth factor reading analyst behaviour on each '
-    'name. Two raw components: <b>forward EPS growth</b> = next-year '
-    'consensus / current-year consensus − 1 (from FMP analyst-estimates), '
-    'and <b>earnings surprise</b> = (actual EPS − estimated EPS) / '
+    '<p>An auxiliary factor reading analyst behaviour on each name. '
+    'Two raw components: <b>forward EPS growth</b> = next-year consensus '
+    '/ current-year consensus − 1 (from FMP analyst-estimates), and '
+    '<b>earnings surprise</b> = (actual EPS − estimated EPS) / '
     '|estimated EPS| on the most recent reported quarter (from FMP '
-    'earnings-surprises). Each component is winsorised and z-scored within '
-    'its sector with the same small-sector fallback as Quality / Value, '
-    'blended 50/50, then winsorised and z-scored across the universe to '
-    'produce expectations_z. Surfaced on every card\'s expanded panel as '
-    'a diagnostic line — <b>not in the composite yet</b>. Step 2 will '
-    'orthogonalise it against M/Q/V and promote into the composite at a '
-    '0.10 weight if coverage and signal hold up.</p>'
+    'earnings-surprises). Each component is winsorised and z-scored '
+    'within its sector (small-sector fall-back to universe), blended '
+    '50/50, then winsorised and z-scored across the universe to '
+    'produce expectations_z. <b>This is a diagnostic-only readout</b> '
+    'surfaced on each card\'s expanded panel — it does not enter the '
+    'ranking composite, does not affect weights, and does not affect '
+    'the <i>Ranking eligibility</i> policy. It is here to help the '
+    'user spot consensus drift, not to drive selection.</p>'
 
     '<h3>Universe &amp; screener</h3>'
     '<p>Stocks live in data/universe.json plus data/universe_extra.txt. '
@@ -2275,6 +2295,140 @@ CATEGORIES_BLOCK = (
 )
 
 
+def _eligibility_section_html(factors_used: dict, names: dict) -> str:
+    """List tickers that were dropped from the ranking by the strict
+    complete-data policy, grouped by reason.
+
+    Quality and Value scores require all required inputs to be present.
+    Tickers with any missing input get no score and are excluded from
+    the ranked output rather than back-filled with zero or rebalanced
+    onto the surviving factors. This drawer surfaces every excluded
+    ticker with the specific reason(s) so the user can audit the
+    funnel.
+    """
+    factor_excluded: dict[str, list[str]] = (
+        factors_used.get("factor_excluded") or {}
+    )
+    qm = factors_used.get("quality_meta") or {}
+    vm = factors_used.get("value_meta") or {}
+    n_active = qm.get("n_active") or vm.get("n_active") or 0
+    n_eligible = factors_used.get("n_eligible")
+    n_excluded = len(factor_excluded)
+
+    if not factor_excluded:
+        subtitle = (
+            f'{n_eligible if n_eligible is not None else 0} eligible · '
+            f'0 excluded · complete data on every active ticker'
+        )
+        return (
+            '<details class="section">'
+            '<summary>'
+            '<div class="section-head">'
+            '<div class="section-title">Ranking eligibility</div>'
+            f'<div class="section-subtitle">{_escape(subtitle)}</div>'
+            '</div>'
+            '</summary>'
+            '<div class="section-body">'
+            '<p class="dh-muted">Strict complete-data policy: a ticker '
+            'is ranked only when Momentum, Quality, and Value all have '
+            'usable inputs. No ticker was excluded for missing data on '
+            'this run.</p>'
+            '</div>'
+            '</details>'
+        )
+
+    # Group by individual reason. A single ticker can be missing more
+    # than one input — it appears under each reason it triggered.
+    by_reason: dict[str, list[str]] = {}
+    for t, reasons in factor_excluded.items():
+        for r in reasons:
+            by_reason.setdefault(r, []).append(t)
+    for r in by_reason:
+        by_reason[r].sort()
+
+    reason_blocks: list[str] = []
+    for reason in sorted(by_reason.keys(), key=lambda r: (-len(by_reason[r]), r)):
+        tks = by_reason[reason]
+        rows = []
+        for t in tks:
+            name = (names.get(t) or "").strip()
+            name_html = (
+                f' <span class="dh-name">{_escape(name)}</span>' if name else ""
+            )
+            rows.append(
+                '<div class="dh-row">'
+                f'<div class="dh-row-head">'
+                f'<span class="dh-tk">{_escape(t)}</span>{name_html}</div>'
+                '</div>'
+            )
+        reason_blocks.append(
+            '<details class="dh-cat sev-block">'
+            '<summary>'
+            f'<span class="dh-cat-label">{_escape(reason)}</span>'
+            f'<span class="dh-cat-count">{len(tks)}</span>'
+            '</summary>'
+            f'<div class="dh-cat-body">{"".join(rows)}</div>'
+            '</details>'
+        )
+
+    top_reasons = sorted(
+        by_reason.items(), key=lambda kv: (-len(kv[1]), kv[0])
+    )[:3]
+    top_summary = " · ".join(
+        f"{_escape(r)} ({len(ts)})" for r, ts in top_reasons
+    )
+    subtitle_bits = []
+    if n_eligible is not None:
+        subtitle_bits.append(f"{n_eligible} eligible")
+    subtitle_bits.append(f"{n_excluded} excluded")
+    if n_active:
+        subtitle_bits.append(f"{n_active} active")
+    subtitle = " · ".join(subtitle_bits)
+
+    qual_line = (
+        f'Quality eligible <b>{int(qm.get("n_eligible", 0))}</b> of '
+        f'<b>{int(qm.get("n_active", n_active))}</b> active '
+        f'({qm.get("coverage", 0.0)*100:.1f}%); '
+        f'{int(qm.get("n_excluded", 0))} excluded.'
+    ) if qm else ""
+    val_line = (
+        f'Value eligible <b>{int(vm.get("n_eligible", 0))}</b> of '
+        f'<b>{int(vm.get("n_active", n_active))}</b> active '
+        f'({vm.get("coverage", 0.0)*100:.1f}%); '
+        f'{int(vm.get("n_excluded", 0))} excluded.'
+    ) if vm else ""
+    coverage_block = (
+        f'<p class="dh-muted">{qual_line}</p>'
+        f'<p class="dh-muted">{val_line}</p>'
+    ) if (qual_line or val_line) else ""
+
+    top_block = (
+        f'<p class="dh-muted">Most common reasons: {top_summary}.</p>'
+        if top_summary else ""
+    )
+
+    return (
+        '<details class="section">'
+        '<summary>'
+        '<div class="section-head">'
+        '<div class="section-title">Ranking eligibility</div>'
+        f'<div class="section-subtitle">{_escape(subtitle)}</div>'
+        '</div>'
+        '</summary>'
+        '<div class="section-body">'
+        '<p class="dh-muted">Strict complete-data policy: a ticker is '
+        'ranked only when Momentum, Quality, and Value all have usable '
+        'inputs. Names below were excluded — no zero-fill, no per-stock '
+        'weight renormalisation. Each ticker may appear under more than '
+        'one reason if multiple inputs were missing.</p>'
+        f'{coverage_block}'
+        f'{top_block}'
+        f'{"".join(reason_blocks)}'
+        '</div>'
+        '</details>'
+    )
+
+
 def _backtest_section_html(bt: dict) -> str:
     lookback = bt.get("lookback_days") or 0
     eq = bt.get("equal")
@@ -2568,6 +2722,7 @@ def render(
     backtest_section = _backtest_section_html(factors_used.get("backtest") or {})
     universe_section = _universe_section_html(factors_used)
     data_health_section = _data_health_section_html(factors_used, names)
+    eligibility_section = _eligibility_section_html(factors_used, names)
 
     raw_count = factors_used.get("universe_raw_count")
     eligible_count = factors_used.get("universe_eligible_count")
@@ -2708,6 +2863,7 @@ def render(
         '</div>'
         f'{full_section}'
         f'{universe_section}'
+        f'{eligibility_section}'
         f'{data_health_section}'
         f'{backtest_section}'
         f'{methodology_section}'

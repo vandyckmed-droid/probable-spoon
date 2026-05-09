@@ -4,7 +4,7 @@ import pandas as pd
 
 import analytics
 import store
-from config import MOMENTUM_MIN_OBS, MARKET_TICKER
+from config import MOMENTUM_MIN_OBS, MARKET_TICKER, W_MOMENTUM, W_QUALITY, W_VALUE
 
 
 # ---------- helpers ----------
@@ -18,14 +18,22 @@ def _resid_frame(tickers, n, seed):
     )
 
 
-def _quality_funds(gp, ta, debt, cash):
+def _quality_funds(gp, ta, debt, cash, *, prior_gp=None, prior_ta=None):
+    """Two-period funds dict for the strict-policy quality test.
+
+    Defaults to a flat prior year so gp_change is computable — the
+    strict complete-data policy excludes any ticker without a usable
+    prior period rather than back-filling NaN components.
+    """
+    p_gp = gp if prior_gp is None else prior_gp
+    p_ta = ta if prior_ta is None else prior_ta
     return {
-        "income": [{"grossProfit": gp}, {}],
+        "income": [{"grossProfit": gp}, {"grossProfit": p_gp}],
         "balance": [
             {"totalAssets": ta, "totalDebt": debt, "cashAndCashEquivalents": cash},
-            {},
+            {"totalAssets": p_ta, "totalDebt": debt, "cashAndCashEquivalents": cash},
         ],
-        "cashflow": [],
+        "cashflow": [{"freeCashFlow": gp}],
     }
 
 
@@ -140,9 +148,12 @@ def test_residuals_drop_short_history():
     assert "SHORT" not in stock_resid.columns
 
 
-# ---------- 6. composite renormalises when quality drops ----------
+# ---------- 6. strict policy excludes names missing a factor ----------
 
-def test_composite_renormalises_when_quality_drops():
+def test_strict_policy_excludes_when_quality_missing():
+    """Names without a quality_z are dropped from the ranking and
+    surfaced in composite_excluded; the surviving names rank with full
+    M+Q+V weights — no renormalisation, no zero-fill."""
     tickers = [f"T{i}" for i in range(10)]
     mom_df = pd.DataFrame(
         {
@@ -175,12 +186,19 @@ def test_composite_renormalises_when_quality_drops():
         index=tickers,
     )
     ts = {t: "Tech" for t in tickers}
-    _, factors_used = analytics.build_ranked(mom_df, qual_df, val_df, ts)
+    ranked, factors_used = analytics.build_ranked(mom_df, qual_df, val_df, ts)
 
     weights = factors_used["weights"]
-    assert "quality" not in weights
-    assert "momentum" in weights and "value" in weights
-    assert abs(sum(weights.values()) - 1.0) < 1e-9
+    # Configured weights apply unchanged — no renormalisation.
+    assert weights == {"momentum": W_MOMENTUM, "quality": W_QUALITY, "value": W_VALUE}
+
+    # Only names with all three z's finite are in the ranked frame.
+    assert set(ranked.index) == {"T0", "T1"}
+
+    excluded = factors_used["composite_excluded"]
+    assert set(excluded.keys()) == {f"T{i}" for i in range(2, 10)}
+    for t in excluded:
+        assert any("quality" in r.lower() for r in excluded[t])
 
 
 # ---------- 7. add_to_universe idempotent ----------
@@ -211,3 +229,103 @@ def test_add_to_universe_uppercases(tmp_root):
 
 def test_company_names_falls_back_to_ticker(tmp_root):
     assert store.company_names(["XXXXX"]) == {"XXXXX": "XXXXX"}
+
+
+# ---------- 10. strict policy excludes incomplete quality / value ----------
+
+def test_strict_quality_excludes_missing_components():
+    """A ticker missing any required Quality input gets no quality_z and
+    is recorded in meta['excluded'] with a human-readable reason."""
+    funds = {
+        "FULL":   _quality_funds(gp=200, ta=1000, debt=100, cash=50),
+        "FULL2":  _quality_funds(gp=180, ta=1000, debt=100, cash=50),
+        # Missing prior period → no YoY change.
+        "NO_PRIOR": {
+            "income": [{"grossProfit": 100}],
+            "balance": [{"totalAssets": 1000, "totalDebt": 50, "cashAndCashEquivalents": 25}],
+            "cashflow": [],
+        },
+        # Missing gross profit entirely.
+        "NO_GP": {
+            "income": [{}, {"grossProfit": 90}],
+            "balance": [
+                {"totalAssets": 1000, "totalDebt": 50, "cashAndCashEquivalents": 25},
+                {"totalAssets": 950, "totalDebt": 50, "cashAndCashEquivalents": 25},
+            ],
+            "cashflow": [],
+        },
+    }
+    ts = {t: "Tech" for t in funds}
+    df, meta = analytics.compute_quality(funds, ts)
+    eligible = set(df.index)
+    assert "FULL" in eligible and "FULL2" in eligible
+    assert "NO_PRIOR" not in eligible
+    assert "NO_GP" not in eligible
+
+    excluded = meta["excluded"]
+    assert "NO_PRIOR" in excluded
+    assert any("YoY" in r for r in excluded["NO_PRIOR"])
+    assert "NO_GP" in excluded
+    assert any("gross profit" in r for r in excluded["NO_GP"])
+    # Coverage uses the active universe (ts) as the denominator.
+    assert meta["n_active"] == 4
+    assert meta["n_eligible"] == 2
+    assert meta["n_excluded"] == 2
+
+
+def test_strict_value_excludes_missing_components():
+    """A ticker missing any required Value input gets no value_z and
+    is recorded in meta['excluded'] with a human-readable reason."""
+    funds = {
+        "FULL":  _value_funds(ebit=300, fcf=200, shares=100, debt=100, cash=50, equity=500),
+        "FULL2": _value_funds(ebit=200, fcf=150, shares=100, debt=100, cash=50, equity=500),
+        # Missing FCF entirely.
+        "NO_FCF": {
+            "income": [{"weightedAverageShsOutDil": 100, "ebit": 100}],
+            "balance": [{
+                "totalDebt": 100, "cashAndCashEquivalents": 50,
+                "totalStockholdersEquity": 500, "totalAssets": 10_000,
+            }],
+            "cashflow": [{}],
+        },
+        # Missing equity → no book/market.
+        "NO_EQUITY": {
+            "income": [{"weightedAverageShsOutDil": 100, "ebit": 100}],
+            "balance": [{
+                "totalDebt": 100, "cashAndCashEquivalents": 50,
+                "totalAssets": 10_000,
+            }],
+            "cashflow": [{"freeCashFlow": 100}],
+        },
+    }
+    dates = pd.date_range("2024-01-01", periods=10, freq="B")
+    prices = pd.DataFrame({t: [10.0] * 10 for t in funds}, index=dates)
+    ts = {t: "Tech" for t in funds}
+    df, meta = analytics.compute_value(funds, prices, ts)
+    eligible = set(df.index)
+    assert "FULL" in eligible and "FULL2" in eligible
+    assert "NO_FCF" not in eligible
+    assert "NO_EQUITY" not in eligible
+
+    excluded = meta["excluded"]
+    assert any("free cash flow" in r for r in excluded["NO_FCF"])
+    assert any("equity" in r for r in excluded["NO_EQUITY"])
+    assert meta["n_active"] == 4
+    assert meta["n_eligible"] == 2
+
+
+# ---------- 11. preferred-share regex doesn't overmatch ordinary tickers ----------
+
+def test_preferred_regex_does_not_overmatch():
+    """The preferred-share suffix pattern should require a series letter
+    after .P / -P (e.g. BAC.PA, BAC-PA) so plain tickers ending in P,
+    or the bare suffixes .P / -P, don't get swept into 'preferred'."""
+    from universe import _classify_one
+    # Ordinary common stocks that previously could have been at risk.
+    for t in ["MMM", "PEP", "AAPL", "BRK.A", "BRK.B"]:
+        status, info = _classify_one(t, {})
+        assert status == "eligible", f"{t} should remain eligible: got {info}"
+    # Real preferred-share suffixes still get caught.
+    for t in ["BAC.PA", "BAC-PA", "BAC.PRA", "BAC-PRA"]:
+        status, info = _classify_one(t, {})
+        assert status == "excluded" and info == "preferred", f"{t} should be preferred"

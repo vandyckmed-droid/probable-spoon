@@ -164,7 +164,12 @@ def add_to_universe_extras(tickers: list[str]) -> list[str]:
 
 _TICKER_EXCLUSIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(\.WS|\.W|-WS|-W)$", re.IGNORECASE),                  "warrant"),
-    (re.compile(r"(\.PR[A-Z]?|-PR[A-Z]?|\.P[A-Z]?|-P[A-Z]?)$", re.I),   "preferred"),
+    # Preferred shares: require a series letter after .P / -P / .PR / -PR
+    # so plain symbols ending in "P" (and the bare suffixes ".P" / "-P"
+    # without a series letter) don't get swept in. US vendors emit
+    # preferreds as e.g. BAC.PA, BAC-PA, BAC.PRA, BAC-PRA — the pattern
+    # below matches each form but stops short of overmatching.
+    (re.compile(r"(\.PR[A-Z]|-PR[A-Z]|\.P[A-Z]|-P[A-Z])$", re.I),       "preferred"),
     (re.compile(r"(\.RT|-RT|\.R)$", re.IGNORECASE),                     "right"),
     (re.compile(r"(-NT|\.NT)$", re.IGNORECASE),                         "note"),
     (re.compile(r"(\.U|-U|=U)$", re.IGNORECASE),                        "unit"),

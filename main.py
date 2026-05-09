@@ -232,12 +232,16 @@ def main():
     # cached, the next run filters cleanly.
     profiles_data = store.profiles()
     eligible_tickers, excluded, labels = classify_universe(raw_tickers, profiles_data)
-    print(
-        f"Eligible: {len(eligible_tickers)} (excluded {len(excluded)}: "
-        + ", ".join(sorted({exclusion_reason_label(r) for r in excluded.values()}))
-        + ")"
-        if excluded else f"Eligible: {len(eligible_tickers)}"
-    )
+    if excluded:
+        reason_summary = ", ".join(sorted({
+            exclusion_reason_label(r) for r in excluded.values()
+        }))
+        print(
+            f"Eligible: {len(eligible_tickers)} "
+            f"(excluded {len(excluded)}: {reason_summary})"
+        )
+    else:
+        print(f"Eligible: {len(eligible_tickers)}")
 
     # Apply user-controlled active filters AFTER hygiene but BEFORE the
     # pipeline runs, so cross-sectional z-scores, composite, ranks, and
@@ -292,12 +296,61 @@ def main():
         returns, sec_resid, ts,
     )
     mom_df = analytics.compute_residual_momentum(stock_resid, ts)
-    qual_df, _ = analytics.compute_quality(funds, ts, ti)
-    val_df, _ = analytics.compute_value(funds, prices_df, ts, ti)
+    qual_df, qual_meta = analytics.compute_quality(funds, ts, ti)
+    val_df, val_meta = analytics.compute_value(funds, prices_df, ts, ti)
     ranked, factors_used = analytics.build_ranked(mom_df, qual_df, val_df, ts, ti)
 
-    # Diagnostic Expectations factor (step 1) — NOT in composite. Attaches as
-    # a separate column the report surfaces in each card's expanded panel.
+    # Strict complete-data policy: collect the per-ticker exclusion reasons
+    # from each factor stage (quality, value) and from build_ranked's
+    # cross-factor eligibility check. The report renders these grouped by
+    # reason so users see exactly why a ticker did not appear in the
+    # ranking — no silent disappearances.
+    factor_excluded: dict[str, list[str]] = {}
+    for t, reasons in (qual_meta.get("excluded") or {}).items():
+        factor_excluded.setdefault(t, []).extend(
+            f"Quality: {r}" for r in reasons
+        )
+    for t, reasons in (val_meta.get("excluded") or {}).items():
+        factor_excluded.setdefault(t, []).extend(
+            f"Value: {r}" for r in reasons
+        )
+    # build_ranked already records whichever factor came back NaN, but it
+    # cannot see why — the per-factor reasons above are richer. Fold in
+    # any composite-stage exclusions that aren't already covered (e.g.
+    # missing momentum due to insufficient price history).
+    for t, reasons in (factors_used.get("composite_excluded") or {}).items():
+        for r in reasons:
+            if r.startswith("missing momentum"):
+                factor_excluded.setdefault(t, []).append(r)
+    factors_used["factor_excluded"] = factor_excluded
+    factors_used["quality_meta"] = {
+        "n_eligible": qual_meta.get("n_eligible", 0),
+        "n_excluded": qual_meta.get("n_excluded", 0),
+        "n_active": qual_meta.get("n_active", 0),
+        "coverage": qual_meta.get("coverage", 0.0),
+    }
+    factors_used["value_meta"] = {
+        "n_eligible": val_meta.get("n_eligible", 0),
+        "n_excluded": val_meta.get("n_excluded", 0),
+        "n_active": val_meta.get("n_active", 0),
+        "coverage": val_meta.get("coverage", 0.0),
+    }
+    if factor_excluded:
+        print(
+            f"Factor coverage: quality eligible "
+            f"{qual_meta.get('n_eligible', 0)}/"
+            f"{qual_meta.get('n_active', 0)} "
+            f"({qual_meta.get('coverage', 0.0)*100:.1f}%), "
+            f"value eligible "
+            f"{val_meta.get('n_eligible', 0)}/"
+            f"{val_meta.get('n_active', 0)} "
+            f"({val_meta.get('coverage', 0.0)*100:.1f}%) · "
+            f"{len(factor_excluded)} excluded by missing data"
+        )
+
+    # Diagnostic-only Expectations factor — NOT in the composite, NOT in
+    # ranking eligibility. Attaches as a separate column the report
+    # surfaces in each card's expanded panel.
     if EXPECTATIONS_ENABLED:
         revisions_data = store.revisions()
         exp_df, exp_meta = analytics.compute_expectations(revisions_data, ts, ti)
