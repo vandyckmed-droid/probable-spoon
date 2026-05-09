@@ -1488,6 +1488,7 @@ def _row_html(
     rank_value: dict | None = None,
     diagnostics: dict | None = None,
     universe_labels: dict | None = None,
+    top_n: int = 25,
 ) -> str:
     """Render one <details class=row> card for a single ticker.
 
@@ -1651,9 +1652,10 @@ def _row_html(
             '</div>'
         )
 
-    # Big 6-1 residual-momentum chart + 21d pullback indicator. Top-25 only.
+    # Big 6-1 residual-momentum chart + 21d pullback indicator. Top-N only,
+    # so the chart stripe matches the actual portfolio when TOP_N changes.
     diagnostics_block = ""
-    if chart_series and rank_composite.get(ticker, 9999) < 25:
+    if chart_series and rank_composite.get(ticker, 9999) < top_n:
         svg, cap = _residual_chart_svg(chart_series, grad_id=f"rg_{safe_id}")
         if svg:
             cur_sig = float(current_m6) if current_m6 is not None else 0.0
@@ -2488,7 +2490,8 @@ def render(
                   rank_momentum=rank_momentum,
                   rank_quality=rank_quality,
                   rank_value=rank_value,
-                  diagnostics=diagnostics, universe_labels=universe_labels)
+                  diagnostics=diagnostics, universe_labels=universe_labels,
+                  top_n=int(top_n) if top_n else 25)
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)

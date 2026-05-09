@@ -338,13 +338,6 @@ def _winsor_zscore_hierarchical(
     return out, scope
 
 
-def _winsor_zscore_within_sector(s: pd.Series, sectors: pd.Series) -> pd.Series:
-    """Backwards-compatible sector-only wrapper (used by tests). New callers
-    should pass an industry bucket and use _winsor_zscore_hierarchical."""
-    z, _scope = _winsor_zscore_hierarchical(s, None, sectors)
-    return z
-
-
 def _aggregate_scope(scopes: list[pd.Series]) -> pd.Series:
     """Per-ticker scope = highest tier observed across the supplied
     component scopes (industry > sector > universe > none). Lets a single
@@ -542,7 +535,7 @@ def compute_expectations(
 
     Returns (df, meta). df is indexed by ticker with columns:
         sector, growth, surprise, growth_z, surprise_z,
-        expectations_raw, expectations_z
+        expectations_scope, expectations_raw, expectations_z
     meta = {"coverage": fraction_of_input_tickers_with_finite_z}.
     """
     ti = ticker_industry or {}
@@ -610,7 +603,7 @@ def compute_expectations(
         if revisions_data else 0.0
     )
     cols = ["sector", "growth", "surprise", "growth_z", "surprise_z",
-            "expectations_raw", "expectations_z"]
+            "expectations_scope", "expectations_raw", "expectations_z"]
     return df[cols], {"coverage": float(coverage)}
 
 

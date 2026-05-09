@@ -20,9 +20,6 @@ Severity ordering (worst first): block (calculation can't run) → fallback
 """
 from __future__ import annotations
 
-from datetime import date
-from typing import Any
-
 import pandas as pd
 
 from config import BETA_LOOKBACK_DAYS
