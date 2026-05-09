@@ -149,9 +149,10 @@ def main():
     top_n = min(TOP_N, len(ranked))
     top_tickers = ranked.head(top_n).index.tolist()
 
-    # 21-day price snapshots for the top-N cards (used by the sparkline).
+    # 21-day price snapshots for every visible card (mini sparkline in the
+    # collapsed row, larger one in the expanded drawer).
     sparklines: dict[str, list[float]] = {}
-    for t in top_tickers:
+    for t in ranked.index[:200]:
         if t in prices_df.columns:
             s = prices_df[t].dropna().tail(21)
             if len(s) >= 5:
@@ -248,7 +249,11 @@ def main():
     # composite is already the default sort from build_ranked.
 
     names = store.company_names(display_ranked.index.tolist())
-    html = report.render(display_ranked, names, factors_used, sparklines=sparklines)
+    logos = store.company_logos(display_ranked.index.tolist())
+    html = report.render(
+        display_ranked, names, factors_used,
+        sparklines=sparklines, logos=logos,
+    )
     report_path = (out_dir / "report.html").resolve()
     report.write_report(html, str(report_path))
     # CSV always carries the full ranked frame, untruncated and unsorted-by-flag.

@@ -17,6 +17,7 @@ _FIELD_MAP = {
     "is_etf": "isEtf",
     "is_fund": "isFund",
     "is_adr": "isAdr",
+    "image": "image",
 }
 
 

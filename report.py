@@ -16,65 +16,109 @@ import pandas as pd
 _CSS = """
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+:root {
+  --bg: #000000;
+  --bg-elev: #0e0e10;
+  --bg-card: #131316;
+  --line: #232326;
+  --text: #ececec;
+  --text-strong: #ffffff;
+  --text-muted: #8a8a8f;
+  --text-faint: #5a5a5e;
+  --accent-up: #34d399;
+  --accent-up-soft: rgba(52, 211, 153, 0.18);
+  --accent-down: #f87171;
+  --accent-down-soft: rgba(248, 113, 113, 0.18);
+  --tabular: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
+             'Roboto Mono', monospace;
+}
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter',
+               'Segoe UI', sans-serif;
   font-size: 15px; line-height: 1.4;
-  color: #1c1c1e; background: #f5f5f7;
-  padding: 14px 12px 32px;
+  color: var(--text); background: var(--bg);
+  padding: 16px 14px 40px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.page-title {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  text-align: center;
+  margin: 4px 0 18px;
+  user-select: none;
 }
 .header {
   font-size: 12px; line-height: 1.5;
-  color: #6b6b70; margin-bottom: 14px;
+  color: var(--text-muted); margin-bottom: 14px;
   user-select: none; -webkit-user-select: none;
+  text-align: center;
 }
-.header b { color: #1c1c1e; font-weight: 600; }
+.header b { color: var(--text); font-weight: 600; }
 .header select {
-  font-family: inherit; font-size: 12px;
-  padding: 2px 8px; margin-left: 4px;
-  border-radius: 6px; border: 1px solid #d8d8db;
-  background: #fff; color: #1c1c1e;
+  font-family: var(--tabular); font-size: 12px;
+  padding: 3px 10px; margin-left: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev); color: var(--text);
 }
 
+/* Sticky sort bar */
 .sticky-top {
   position: sticky; top: 0; z-index: 10;
-  margin: 0 -12px 8px;
-  background: #f5f5f7;
-  border-bottom: 1px solid #e8e8eb;
+  margin: 0 -14px 12px;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
 }
 .toolbar {
-  display: flex; gap: 6px; flex-wrap: wrap;
-  padding: 8px 14px 6px;
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 8px 14px 8px;
   align-items: center;
   user-select: none; -webkit-user-select: none;
 }
 .toolbar-label {
-  font-size: 11px; font-weight: 600; color: #8e8e93;
-  text-transform: uppercase; letter-spacing: 0.05em;
-  margin-right: 4px;
+  font-size: 10px; font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  margin-right: 6px;
 }
+
+/* Segmented controls — minimal, low-contrast inactive, glow on active */
 .sort-radio { position: absolute; opacity: 0; pointer-events: none; }
 .sort-btn {
   font: inherit; font-size: 12px; font-weight: 500;
-  border: 1px solid #d8d8db; background: #fff; color: #1c1c1e;
-  border-radius: 999px; padding: 4px 10px;
+  background: transparent; color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 10px;
   cursor: pointer; user-select: none; -webkit-user-select: none;
+  transition: color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
 }
+.sort-btn:hover { color: var(--text); }
+
 #sort-composite:checked ~ .sticky-top label[for="sort-composite"],
 #sort-cash:checked      ~ .sticky-top label[for="sort-cash"],
 #sort-sector:checked    ~ .sticky-top label[for="sort-sector"],
 #sort-ticker:checked    ~ .sticky-top label[for="sort-ticker"],
 #sort-mktcap:checked    ~ .sticky-top label[for="sort-mktcap"] {
-  background: #1c1c1e; color: #fff; border-color: #1c1c1e;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-strong);
+  border-color: rgba(255,255,255,0.12);
+  box-shadow: 0 0 18px rgba(255,255,255,0.06);
 }
 
+/* CSS-only sort */
 #sort-composite:checked ~ .section .list .row { order: var(--r-c, 0); }
 #sort-cash:checked      ~ .section .list .row { order: var(--r-cash, 0); }
 #sort-sector:checked    ~ .section .list .row { order: var(--r-sec, 0); }
 #sort-ticker:checked    ~ .section .list .row { order: var(--r-tick, 0); }
 #sort-mktcap:checked    ~ .section .list .row { order: var(--r-mkt, 0); }
 
-/* Show-top-N toggle: rows carry .in-25 / .in-50 / .in-100 classes based on
-   their composite rank. CSS hides anything outside the active threshold. */
+/* Show-top-N toggle */
 #show-25:checked ~ .section .list .row { display: none; }
 #show-50:checked ~ .section .list .row { display: none; }
 #show-25:checked ~ .section .list .row.in-25 { display: block; }
@@ -86,11 +130,13 @@ body {
 #show-25:checked  ~ .section label[for="show-25"],
 #show-50:checked  ~ .section label[for="show-50"],
 #show-100:checked ~ .section label[for="show-100"] {
-  background: #1c1c1e; color: #fff; border-color: #1c1c1e;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-strong);
+  border-color: rgba(255,255,255,0.12);
+  box-shadow: 0 0 18px rgba(255,255,255,0.06);
 }
 
-/* Weighting scheme toggle: hide all three cash-mini variants by default,
-   then reveal whichever one the active radio matches. */
+/* Weighting toggle: hide all three cash variants by default, reveal active */
 .cm-eq, .cm-ivp, .cm-hrp,
 .wl-eq, .wl-ivp, .wl-hrp { display: none; }
 #wt-equal:checked ~ .section .cm-eq,
@@ -102,16 +148,20 @@ body {
 #wt-equal:checked ~ .section label[for="wt-equal"],
 #wt-ivp:checked   ~ .section label[for="wt-ivp"],
 #wt-hrp:checked   ~ .section label[for="wt-hrp"] {
-  background: #1c1c1e; color: #fff; border-color: #1c1c1e;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-strong);
+  border-color: rgba(255,255,255,0.12);
+  box-shadow: 0 0 18px rgba(255,255,255,0.06);
 }
 
-.list { display: flex; flex-direction: column; gap: 6px; }
+.list { display: flex; flex-direction: column; gap: 8px; }
 
+/* Top-level section cards */
 details.section {
-  background: #ffffff;
-  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
   margin-bottom: 12px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   overflow: hidden;
 }
 details.section > summary {
@@ -124,7 +174,7 @@ details.section > summary::-webkit-details-marker { display: none; }
 details.section > summary::marker { display: none; }
 details.section > summary::after {
   content: ''; display: inline-block;
-  border: solid #b0b0b5; border-width: 0 2px 2px 0;
+  border: solid var(--text-faint); border-width: 0 2px 2px 0;
   padding: 4px;
   transform: rotate(45deg);
   margin-left: 12px; flex: 0 0 auto;
@@ -132,259 +182,310 @@ details.section > summary::after {
 }
 details.section[open] > summary::after { transform: rotate(-135deg); }
 .section-head { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
-.section-title { font-size: 16px; font-weight: 600; color: #1c1c1e; }
-.section-subtitle { font-size: 12px; color: #6b6b70; margin-top: 2px; }
-.section-body { padding: 0 12px 12px; }
-.weighting-toggle {
-  display: flex; gap: 6px; flex-wrap: wrap;
-  align-items: center;
-  padding: 4px 4px 10px;
-  user-select: none; -webkit-user-select: none;
+.section-title {
+  font-size: 16px; font-weight: 600;
+  color: var(--text-strong);
+  letter-spacing: -0.01em;
 }
-.section-body .list-header {
-  padding: 4px 4px 8px;
-  display: grid;
-  grid-template-columns: 30px 1fr 80px;
-  column-gap: 10px;
-  font-size: 11px; font-weight: 600;
-  color: #8e8e93;
-  text-transform: uppercase; letter-spacing: 0.05em;
-  user-select: none; -webkit-user-select: none;
+.section-subtitle {
+  font-size: 12px; color: var(--text-muted);
+  margin-top: 3px;
 }
-.section-body .list-header .col-rank { text-align: center; }
-.section-body .list-header .col-comp { text-align: right; }
+.section-body { padding: 0 14px 16px; }
 
-.bt-table {
-  display: flex; flex-direction: column;
-  font-size: 13px;
+/* Inline weighting / show toggles inside a section body */
+.weighting-toggle {
+  display: inline-flex; gap: 2px;
+  align-items: center;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px;
+  margin: 6px 0 10px;
+  user-select: none; -webkit-user-select: none;
 }
+.weighting-toggle .toolbar-label {
+  margin: 0 8px 0 6px;
+  color: var(--text-faint);
+}
+.weighting-toggle .sort-btn {
+  border-radius: 6px;
+  padding: 4px 12px;
+  border-color: transparent;
+}
+
+/* Column-labels row inside section body */
+.section-body .list-header {
+  padding: 6px 4px 10px;
+  display: grid;
+  grid-template-columns: 22px 28px 1fr 56px 70px;
+  column-gap: 10px;
+  font-size: 10px; font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  user-select: none; -webkit-user-select: none;
+}
+.section-body .list-header .col-rank { text-align: center; grid-column: 1; }
+.section-body .list-header .col-name { grid-column: 3; }
+.section-body .list-header .col-comp { text-align: right; grid-column: 5; }
+
+/* Backtest table */
+.bt-table { display: flex; flex-direction: column; font-size: 13px; }
 .bt-row {
   display: grid;
   grid-template-columns: 1.2fr repeat(3, 1fr);
   column-gap: 8px;
-  padding: 6px 4px;
+  padding: 8px 4px;
   align-items: baseline;
-  border-bottom: 1px solid #ececef;
+  border-bottom: 1px solid var(--line);
 }
 .bt-row:last-child { border-bottom: none; }
-.bt-row.bt-head { color: #8e8e93; font-size: 11px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.04em;
+.bt-row.bt-head {
+  color: var(--text-faint); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.12em;
 }
-.bt-label { color: #1c1c1e; font-weight: 500; }
+.bt-label { color: var(--text); font-weight: 500; }
 .bt-cell {
+  font-family: var(--tabular);
   font-variant-numeric: tabular-nums; text-align: right;
-  color: #1c1c1e;
+  color: var(--text);
 }
-.bt-cell.ret { font-weight: 600; }
-.bt-cell.dd { color: #b8434b; }
+.bt-cell.ret { font-weight: 600; color: var(--text-strong); }
+.bt-cell.dd { color: var(--accent-down); }
 .bt-caveat {
-  font-size: 12px; line-height: 1.5;
-  color: #8e8e93; margin: 12px 0 0;
+  font-size: 12px; line-height: 1.55;
+  color: var(--text-muted); margin: 14px 0 0;
 }
 
+/* Methodology */
 .methodology-body h3 {
-  font-size: 13px; font-weight: 600;
-  margin: 14px 0 4px; color: #1c1c1e;
+  font-size: 12px; font-weight: 600;
+  margin: 16px 0 6px; color: var(--text-strong);
+  text-transform: uppercase; letter-spacing: 0.08em;
 }
 .methodology-body h3:first-child { margin-top: 4px; }
 .methodology-body p {
-  font-size: 13px; line-height: 1.5;
-  color: #4b4b50; margin: 0 0 8px;
+  font-size: 13px; line-height: 1.6;
+  color: var(--text-muted); margin: 0 0 10px;
 }
 
+/* Stock row card */
 details.row {
-  background: #ffffff;
-  border-radius: 10px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
   overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+details.row[open] {
+  border-color: rgba(52, 211, 153, 0.35);
+  box-shadow: 0 0 30px rgba(52, 211, 153, 0.10);
 }
 details.row > summary {
-  list-style: none;
-  cursor: pointer;
-  padding: 10px 14px;
+  list-style: none; cursor: pointer;
+  padding: 12px 14px;
   display: grid;
-  grid-template-columns: 30px 1fr 80px;
+  grid-template-columns: 22px 28px 1fr 56px 70px;
   grid-template-rows: auto auto;
   column-gap: 10px;
-  row-gap: 2px;
+  row-gap: 3px;
   align-items: center;
 }
 details.row > summary::-webkit-details-marker { display: none; }
 details.row > summary::marker { display: none; }
+
 .rank {
   grid-row: 1 / span 2; grid-column: 1;
-  font-size: 13px; color: #8e8e93;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
+  font-family: var(--tabular);
+  font-size: 12px; color: var(--text-faint);
+  font-variant-numeric: tabular-nums; text-align: center;
 }
+
+/* Circular logo */
+.logo {
+  grid-row: 1 / span 2; grid-column: 2;
+  align-self: center;
+  display: inline-block;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background-color: var(--bg-elev);
+  background-size: 70% 70%;
+  background-position: center;
+  background-repeat: no-repeat;
+  border: 1px solid var(--line);
+}
+
 .ticker {
-  grid-row: 1; grid-column: 2;
-  font-weight: 600; font-size: 17px;
+  grid-row: 1; grid-column: 3;
+  font-weight: 600; font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--text-strong);
+}
+
+/* Composite pill — outlined bezel with soft glow */
+.pill {
+  grid-row: 1; grid-column: 5;
+  justify-self: end;
+  font-family: var(--tabular);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600; font-size: 13px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid;
+  white-space: nowrap;
   letter-spacing: -0.01em;
 }
-.pill {
-  grid-row: 1; grid-column: 3;
-  justify-self: end;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600; font-size: 14px;
-  padding: 3px 10px; border-radius: 999px;
-  white-space: nowrap;
+.pill.up-strong {
+  color: var(--accent-up); border-color: var(--accent-up);
+  box-shadow: 0 0 14px rgba(52,211,153,0.30);
+  background: rgba(52,211,153,0.05);
 }
+.pill.up-light {
+  color: var(--accent-up); border-color: rgba(52,211,153,0.55);
+  background: rgba(52,211,153,0.04);
+}
+.pill.down-strong {
+  color: var(--accent-down); border-color: var(--accent-down);
+  box-shadow: 0 0 14px rgba(248,113,113,0.28);
+  background: rgba(248,113,113,0.05);
+}
+.pill.down-light {
+  color: var(--accent-down); border-color: rgba(248,113,113,0.55);
+  background: rgba(248,113,113,0.04);
+}
+.pill.flat {
+  color: var(--text-muted); border-color: var(--line);
+}
+
 .cash-mini {
-  grid-row: 2; grid-column: 3;
+  grid-row: 2; grid-column: 5;
   justify-self: end; text-align: right;
-  font-size: 12px; color: #6b6b70;
+  font-family: var(--tabular);
+  font-size: 11px; color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  letter-spacing: 0;
 }
+
+/* Mini sparkline next to each row */
+.mini-spark-cell {
+  grid-row: 1 / span 2; grid-column: 4;
+  align-self: center; justify-self: center;
+}
+svg.mini-spark {
+  display: block;
+  width: 56px; height: 22px;
+  opacity: 0.85;
+}
+
 .meta {
-  grid-row: 2; grid-column: 2;
-  font-size: 13px; color: #6b6b70;
-  display: flex; align-items: baseline; gap: 6px;
+  grid-row: 2; grid-column: 3;
+  font-size: 12px; color: var(--text-muted);
+  display: flex; align-items: baseline; gap: 5px;
   min-width: 0;
 }
 .meta .name {
-  flex: 1 1 auto; min-width: 0;
+  flex: 0 1 auto; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: #1c1c1e;
+  color: var(--text);
 }
-.meta .dot { flex: 0 0 auto; opacity: 0.5; }
+.meta .dot { flex: 0 0 auto; opacity: 0.45; }
 .meta .sector { flex: 0 0 auto; white-space: nowrap; }
-.meta .tags { flex: 0 0 auto; display: inline-flex; gap: 4px; margin-left: 4px; }
+.meta .tags { flex: 0 0 auto; display: inline-flex; gap: 3px; margin-left: 3px; }
 .meta .tag {
-  font-size: 10px; font-weight: 600;
-  letter-spacing: 0.04em;
-  padding: 1px 6px; border-radius: 4px;
-  background: #ececef; color: #4b4b50;
+  font-size: 9px; font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 1px 5px; border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-muted);
+  border: 1px solid var(--line);
   text-transform: uppercase;
 }
+
 .full-name {
-  font-size: 13px; color: #6b6b70;
-  margin-top: 10px; margin-bottom: -2px;
+  font-size: 12px; color: var(--text-muted);
+  margin-top: 4px;
+  letter-spacing: -0.01em;
 }
 
-.expanded { padding: 0 14px 14px; }
-.expanded .divider { border-top: 1px solid #e8e8eb; margin: 0 0 12px; }
+.expanded { padding: 6px 14px 16px; }
+.expanded .divider {
+  border-top: 1px solid var(--line);
+  margin: 0 0 14px;
+}
 
+/* Drawer sparkline — large, soft gradient fill */
+.sparkline-row { margin: 8px 0 18px; }
+.sparkline-cap {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 8px;
+}
+.sparkline-label {
+  font-size: 10px; font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.12em;
+}
+.sparkline-pct {
+  font-family: var(--tabular);
+  font-size: 16px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.sparkline-pct.up   { color: var(--accent-up); }
+.sparkline-pct.down { color: var(--accent-down); }
+svg.sparkline {
+  display: block;
+  width: 100%; height: 64px;
+  color: var(--text-faint);
+}
+
+/* Factor block in drawer */
 .factors {
   display: grid;
   grid-template-columns: 1fr auto auto;
-  column-gap: 18px; row-gap: 6px;
+  column-gap: 22px; row-gap: 9px;
   font-size: 13px;
+  margin-top: 4px;
 }
-.factors .label { color: #1c1c1e; }
+.factors .label { color: var(--text); }
 .factors .z, .factors .contrib {
+  font-family: var(--tabular);
   font-variant-numeric: tabular-nums; text-align: right;
 }
-.factors .z { color: #6b6b70; }
-.factors .contrib { color: #1c1c1e; font-weight: 500; }
-.factors .contrib .w { color: #8e8e93; font-weight: 400; margin-left: 4px; }
+.factors .z { color: var(--text-muted); }
+.factors .contrib { color: var(--text); font-weight: 500; }
+.factors .contrib .w {
+  color: var(--text-faint); font-weight: 400; margin-left: 6px;
+}
 .factors .total .label,
 .factors .total .contrib {
   font-weight: 700;
   font-size: 17px;
+  color: var(--text-strong);
   letter-spacing: -0.01em;
 }
 .factors .total .label,
 .factors .total .z,
 .factors .total .contrib {
-  border-top: 1px solid #e8e8eb;
-  padding-top: 8px; margin-top: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px; margin-top: 4px;
 }
-.factors .muted { color: #b0b0b5; font-weight: 400; }
+.factors .muted { color: var(--text-faint); font-weight: 400; }
 
 .explain {
-  font-size: 13px; line-height: 1.5;
-  color: #4b4b50; margin-top: 14px;
+  font-size: 13px; line-height: 1.65;
+  color: var(--text-muted);
+  margin-top: 18px;
+  letter-spacing: 0.005em;
 }
 .cash-line {
-  font-size: 13px; color: #1c1c1e;
-  margin-top: 10px;
-}
-.cash-line b { font-weight: 600; }
-
-.sparkline-row { margin: 4px 0 14px; }
-.sparkline-cap {
-  display: flex; justify-content: space-between; align-items: baseline;
-  margin-bottom: 6px;
-}
-.sparkline-label {
-  font-size: 11px; font-weight: 600;
-  color: #8e8e93;
-  text-transform: uppercase; letter-spacing: 0.05em;
-}
-.sparkline-pct {
-  font-size: 17px; font-weight: 700;
+  font-family: var(--tabular);
+  font-size: 12px; color: var(--text-muted);
+  margin-top: 14px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
 }
-.sparkline-pct.up   { color: #2e9e60; }
-.sparkline-pct.down { color: #c0392b; }
-.sparkline {
-  display: block;
-  width: 100%; height: 56px;
-  color: #6b6b70;
-}
-
-.pill.up-strong   { background: #2ecc71; color: #0d3a1f; }
-.pill.up-light    { background: #d4f1e0; color: #0d3a1f; }
-.pill.down-strong { background: #e74c3c; color: #4a0e08; }
-.pill.down-light  { background: #fbe1de; color: #4a0e08; }
-.pill.flat        { background: #ececef; color: #1c1c1e; }
-
-@media (prefers-color-scheme: dark) {
-  body { color: #ececec; background: #000000; }
-  .header { color: #8e8e93; }
-  .header b { color: #ececec; }
-  .header select { background: #1c1c1e; color: #ececec; border-color: #3a3a3c; }
-  .sticky-top { background: #000000; border-bottom-color: #2c2c2e; }
-  .toolbar-label { color: #8e8e93; }
-  .sort-btn { background: #1c1c1e; color: #ececec; border-color: #3a3a3c; }
-  #sort-composite:checked ~ .sticky-top label[for="sort-composite"],
-  #sort-cash:checked      ~ .sticky-top label[for="sort-cash"],
-  #sort-sector:checked    ~ .sticky-top label[for="sort-sector"],
-  #sort-ticker:checked    ~ .sticky-top label[for="sort-ticker"],
-  #sort-mktcap:checked    ~ .sticky-top label[for="sort-mktcap"] {
-    background: #ececec; color: #000; border-color: #ececec;
-  }
-  .section-body .list-header { color: #8e8e93; }
-  details.section { background: #1c1c1e; box-shadow: none; }
-  details.section > summary::after { border-color: #8e8e93; }
-  .section-title { color: #ececec; }
-  .section-subtitle { color: #8e8e93; }
-  .methodology-body h3 { color: #ececec; }
-  .methodology-body p { color: #aeaeb2; }
-  .bt-row { border-bottom-color: #2c2c2e; }
-  .bt-label { color: #ececec; }
-  .bt-cell { color: #ececec; }
-  .bt-cell.dd { color: #ff6e75; }
-  .bt-caveat { color: #8e8e93; }
-  details.row { background: #1c1c1e; box-shadow: none; }
-  .cash-mini { color: #8e8e93; }
-  .ticker { color: #ececec; }
-  .meta { color: #8e8e93; }
-  .meta .name { color: #ececec; }
-  .meta .tag { background: #2c2c2e; color: #aeaeb2; }
-  .full-name { color: #8e8e93; }
-  .rank { color: #8e8e93; }
-  .expanded .divider { border-top-color: #2c2c2e; }
-  .factors .label, .factors .contrib { color: #ececec; }
-  .factors .z { color: #8e8e93; }
-  .factors .contrib .w { color: #6b6b70; }
-  .factors .total .label, .factors .total .z, .factors .total .contrib {
-    border-top-color: #2c2c2e;
-  }
-  .factors .muted { color: #6b6b70; }
-  .explain { color: #aeaeb2; }
-  .cash-line { color: #ececec; }
-  .sparkline { color: #aeaeb2; }
-  .sparkline-label { color: #8e8e93; }
-  .sparkline-pct.up   { color: #44c777; }
-  .sparkline-pct.down { color: #ff7b7b; }
-  .pill.up-light    { background: #14401f; color: #79e29c; }
-  .pill.down-light  { background: #4a1410; color: #ff9c91; }
-  .pill.flat        { background: #2c2c2e; color: #ececec; }
-}
+.cash-line b { font-weight: 600; color: var(--text-strong); }
 """
 
 
@@ -549,14 +650,19 @@ def _factor_row(label: str, weight, z) -> str:
     )
 
 
-def _sparkline_svg(values: list[float], width: int = 280, height: int = 40) -> str:
-    """Inline SVG sparkline with a subtle start-price baseline.
+def _sparkline_svg(
+    values: list[float],
+    width: int = 280, height: int = 56,
+    *, gradient: bool = True, klass: str = "sparkline",
+    grad_id: str = "spk_grad",
+) -> str:
+    """Inline SVG sparkline with a baseline reference and optional gradient fill.
 
-    A faint horizontal reference line sits at the start price so net
-    direction is readable at a glance — points above it are gains over
-    the window, points below are losses. Stroke colour is a muted green
-    if the window is net positive, muted red if net negative. Returns
-    an empty string for too-short or degenerate input.
+    Stroke is a muted emerald or coral keyed to the 21-day net change.
+    A faint horizontal line sits at the start price as a reference. When
+    `gradient` is true, the area under the line is filled with a soft
+    gradient fading from the line colour to transparent at the bottom —
+    used for the larger drawer chart. Mini variants set gradient=False.
     """
     if not values or len(values) < 2:
         return ""
@@ -570,22 +676,71 @@ def _sparkline_svg(values: list[float], width: int = 280, height: int = 40) -> s
     def y_of(v: float) -> float:
         return height - margin - (v - vmin) / rng * (height - 2 * margin)
 
+    coords = [(i * width / (n - 1), y_of(v)) for i, v in enumerate(values)]
+    pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+    base_y = y_of(values[0])
+    up = values[-1] >= values[0]
+    line_color = "#34d399" if up else "#f87171"
+
+    grad_def = ""
+    fill = ""
+    if gradient:
+        grad_def = (
+            f'<defs><linearGradient id="{grad_id}" x1="0" y1="0" x2="0" y2="1">'
+            f'<stop offset="0%" stop-color="{line_color}" stop-opacity="0.32"/>'
+            f'<stop offset="100%" stop-color="{line_color}" stop-opacity="0.00"/>'
+            f'</linearGradient></defs>'
+        )
+        # Closed area path for the fill: line points, then down-right corner,
+        # then down-left corner, back to start.
+        first_x = coords[0][0]
+        last_x = coords[-1][0]
+        path_pts = " ".join(f"L {x:.1f} {y:.1f}" for x, y in coords[1:])
+        area_path = (
+            f"M {first_x:.1f} {coords[0][1]:.1f} {path_pts} "
+            f"L {last_x:.1f} {height} L {first_x:.1f} {height} Z"
+        )
+        fill = f'<path d="{area_path}" fill="url(#{grad_id})"/>'
+
+    return (
+        f'<svg class="{klass}" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
+        f'{grad_def}{fill}'
+        f'<line x1="0" y1="{base_y:.1f}" x2="{width}" y2="{base_y:.1f}" '
+        f'stroke="currentColor" stroke-opacity="0.20" stroke-width="1" '
+        f'stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/>'
+        f'<polyline fill="none" stroke="{line_color}" stroke-width="1.6" '
+        f'stroke-linejoin="round" stroke-linecap="round" '
+        f'vector-effect="non-scaling-stroke" points="{pts}"/>'
+        '</svg>'
+    )
+
+
+def _mini_sparkline_svg(values: list[float]) -> str:
+    """Compact sparkline for the collapsed row (no fill, smaller, no baseline)."""
+    if not values or len(values) < 2:
+        return ""
+    vmin, vmax = min(values), max(values)
+    rng = vmax - vmin
+    if rng <= 0:
+        return ""
+    width, height = 56, 22
+    margin = 1
+    n = len(values)
+
+    def y_of(v: float) -> float:
+        return height - margin - (v - vmin) / rng * (height - 2 * margin)
+
     pts = " ".join(
         f"{i * width / (n - 1):.1f},{y_of(v):.1f}"
         for i, v in enumerate(values)
     )
-    base_y = y_of(values[0])
     up = values[-1] >= values[0]
-    # Muted, mobile-friendly direction colours; baseline uses currentColor so
-    # it follows the surrounding text (and adapts to dark mode automatically).
-    line_color = "#2e9e60" if up else "#c0392b"
+    line_color = "#34d399" if up else "#f87171"
     return (
-        f'<svg class="sparkline" viewBox="0 0 {width} {height}" '
+        f'<svg class="mini-spark" viewBox="0 0 {width} {height}" '
         f'preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
-        f'<line x1="0" y1="{base_y:.1f}" x2="{width}" y2="{base_y:.1f}" '
-        f'stroke="currentColor" stroke-opacity="0.18" stroke-width="1" '
-        f'vector-effect="non-scaling-stroke"/>'
-        f'<polyline fill="none" stroke="{line_color}" stroke-width="1.5" '
+        f'<polyline fill="none" stroke="{line_color}" stroke-width="1.4" '
         f'stroke-linejoin="round" stroke-linecap="round" '
         f'vector-effect="non-scaling-stroke" points="{pts}"/>'
         '</svg>'
@@ -610,6 +765,7 @@ def _row_html(
     rank_ticker: dict, rank_mktcap: dict,
     sparklines: dict | None = None,
     universe_labels: dict | None = None,
+    logos: dict | None = None,
 ) -> str:
     """Render one <details class=row> card for a single ticker.
 
@@ -686,11 +842,14 @@ def _row_html(
 
     explanation = _explain(mom_z, qual_z, val_z)
 
+    series = (sparklines or {}).get(ticker) or []
+    mini_spark_html = _mini_sparkline_svg(series) if series else ""
+
     sparkline_block = ""
-    if sparklines and rank_composite.get(ticker, 9999) < 25:
-        series = sparklines.get(ticker) or []
-        svg = _sparkline_svg(series)
-        if svg and series and series[0] != 0:
+    if series and rank_composite.get(ticker, 9999) < 25 and series[0] != 0:
+        grad_id = f"spk_{_escape(ticker).replace('.', '_').replace('-', '_')}"
+        svg = _sparkline_svg(series, gradient=True, grad_id=grad_id)
+        if svg:
             pct = series[-1] / series[0] - 1.0
             pct_cls = "up" if pct >= 0 else "down"
             pct_str = f"{pct*100:+.2f}%"
@@ -703,6 +862,18 @@ def _row_html(
                 f'{svg}'
                 '</div>'
             )
+
+    logo_url = (logos or {}).get(ticker, "")
+    if logo_url:
+        safe_url = (
+            logo_url.replace("'", "%27").replace('"', "%22")
+            .replace("<", "%3C").replace(">", "%3E")
+        )
+        logo_html = (
+            f'<span class="logo" style="background-image:url(\'{safe_url}\')"></span>'
+        )
+    else:
+        logo_html = '<span class="logo"></span>'
 
     order_style = (
         f"--r-c:{rank_composite.get(ticker, 0)};"
@@ -723,6 +894,7 @@ def _row_html(
         f'data-eq="{eq_w}" data-ivp="{ivp_w}" data-hrp="{hrp_w}">'
         '<summary>'
         f'<span class="rank">{rank}</span>'
+        f'{logo_html}'
         f'<span class="ticker">{ticker_esc}</span>'
         f'<span class="pill {pill_cls}">{composite_text}</span>'
         f'<span class="meta">'
@@ -731,6 +903,7 @@ def _row_html(
         f'<span class="sector">{sector}</span>'
         f'{tags_html}'
         f'</span>'
+        f'<span class="mini-spark-cell">{mini_spark_html}</span>'
         f'{cash_minis}'
         '</summary>'
         '<div class="expanded">'
@@ -962,6 +1135,7 @@ except ImportError:
 def render(
     ranked_df: pd.DataFrame, names: dict, factors_used: dict,
     sparklines: dict | None = None,
+    logos: dict | None = None,
 ) -> str:
     weights = factors_used.get("weights", {})
     scheme = factors_used.get("weighting_scheme", "")
@@ -1043,7 +1217,8 @@ def render(
     rows_html = "".join(
         _row_html(t, r, names, weights, cash, scheme_scales,
                   rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap,
-                  sparklines=sparklines, universe_labels=universe_labels)
+                  sparklines=sparklines, universe_labels=universe_labels,
+                  logos=logos)
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)
@@ -1163,7 +1338,7 @@ def render(
         '<!doctype html>'
         '<html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        '<title>M/Q/V Ranking</title>'
+        '<title>Portfolio Report</title>'
         f'<style>{_CSS}</style>'
         '</head><body>'
         # Hidden sort + weighting radios at the top of body so the CSS general-
@@ -1179,6 +1354,7 @@ def render(
         f'<input type="radio" name="show" id="show-25" class="sort-radio"{ " checked" if initial_show == "25" else "" }>'
         f'<input type="radio" name="show" id="show-50" class="sort-radio"{ " checked" if initial_show == "50" else "" }>'
         f'<input type="radio" name="show" id="show-100" class="sort-radio"{ " checked" if initial_show == "100" else "" }>'
+        '<div class="page-title">Portfolio Report</div>'
         f'<div class="header">{header_html}</div>'
         '<div class="sticky-top">'
         '<div class="toolbar">'
