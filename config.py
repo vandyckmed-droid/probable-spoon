@@ -55,7 +55,8 @@ TOP_N                = 25
 WEIGHTING_SCHEME     = "hrp"           # default for the Weighted Top 25 toggle
 WEIGHT_LOOKBACK_DAYS = 252
 CASH_DEPLOYMENT      = 30000           # default $; overridden by `main.py --cash`
-VOL_TARGET           = 0.12            # annualised target portfolio vol; None disables
+VOL_TARGET                = 0.15            # annualised target portfolio vol; None disables
+VOL_TARGET_MAX_LEVERAGE   = 1.25            # scale cap when realised vol < target
 BACKTEST_DAYS        = 126             # ~6 months of look-back attribution
 
 # Expectations factor — diagnostic only in step 1, NOT in composite yet.

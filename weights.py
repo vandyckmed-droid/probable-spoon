@@ -262,13 +262,22 @@ def portfolio_volatility(
     return float(np.sqrt(var) * np.sqrt(_TRADING_DAYS))
 
 
-def vol_target_scale(realized: float, target: float | None) -> float:
-    """min(1, target/realized) when both finite and positive; else 1.0."""
+def vol_target_scale(
+    realized: float, target: float | None, max_leverage: float = 1.0,
+) -> float:
+    """target / realized, clipped at `max_leverage`.
+
+    When max_leverage = 1.0 the function never produces leverage — it only
+    scales down a portfolio whose realised vol exceeds the target. Pass a
+    larger cap (e.g. 1.25) to allow scaling UP when realised vol is below
+    target, up to that ceiling.
+    """
     if target is None or target <= 0 or realized <= 0:
         return 1.0
     if not np.isfinite(realized) or not np.isfinite(target):
         return 1.0
-    return float(min(1.0, target / realized))
+    cap = float(max(1.0, max_leverage))
+    return float(min(cap, target / realized))
 
 
 def backtest_portfolio(

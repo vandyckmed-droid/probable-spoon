@@ -17,8 +17,8 @@ import store
 import weights as weights_mod
 from config import (
     MARKET_TICKER, TOP_N, WEIGHTING_SCHEME, WEIGHT_LOOKBACK_DAYS,
-    CASH_DEPLOYMENT, BETA_LOOKBACK_DAYS, VOL_TARGET, BACKTEST_DAYS,
-    EXPECTATIONS_ENABLED,
+    CASH_DEPLOYMENT, BETA_LOOKBACK_DAYS, VOL_TARGET, VOL_TARGET_MAX_LEVERAGE,
+    BACKTEST_DAYS, EXPECTATIONS_ENABLED,
 )
 from universe import (
     classify_universe, exclusion_reason_label,
@@ -166,7 +166,10 @@ def parse_args(argv=None):
     )
     p.add_argument(
         "--sort", default="composite",
-        choices=["composite", "cash", "sector", "ticker", "mktcap"],
+        choices=[
+            "composite", "cash", "sector", "ticker", "mktcap",
+            "momentum", "quality", "value",
+        ],
         help="Initial sort order in the report (default composite).",
     )
     p.add_argument(
@@ -340,9 +343,15 @@ def main():
     sigma_eq = weights_mod.portfolio_volatility(returns, equal_w, WEIGHT_LOOKBACK_DAYS)
     sigma_ivp = weights_mod.portfolio_volatility(returns, ivp_w, WEIGHT_LOOKBACK_DAYS)
     sigma_hrp = weights_mod.portfolio_volatility(returns, hrp_w, WEIGHT_LOOKBACK_DAYS)
-    scale_eq = weights_mod.vol_target_scale(sigma_eq, VOL_TARGET)
-    scale_ivp = weights_mod.vol_target_scale(sigma_ivp, VOL_TARGET)
-    scale_hrp = weights_mod.vol_target_scale(sigma_hrp, VOL_TARGET)
+    scale_eq = weights_mod.vol_target_scale(
+        sigma_eq, VOL_TARGET, VOL_TARGET_MAX_LEVERAGE,
+    )
+    scale_ivp = weights_mod.vol_target_scale(
+        sigma_ivp, VOL_TARGET, VOL_TARGET_MAX_LEVERAGE,
+    )
+    scale_hrp = weights_mod.vol_target_scale(
+        sigma_hrp, VOL_TARGET, VOL_TARGET_MAX_LEVERAGE,
+    )
 
     cash = args.cash if args.cash is not None else CASH_DEPLOYMENT
     factors_used["weighting_scheme"] = WEIGHTING_SCHEME
@@ -350,6 +359,7 @@ def main():
     factors_used["cash_deployment"] = float(cash)
     factors_used["hrp_lookback"] = BETA_LOOKBACK_DAYS
     factors_used["vol_target"] = VOL_TARGET
+    factors_used["vol_target_max_leverage"] = VOL_TARGET_MAX_LEVERAGE
     factors_used["scheme_vols"] = {
         "equal": sigma_eq, "ivp": sigma_ivp, "hrp": sigma_hrp,
     }
@@ -413,6 +423,18 @@ def main():
     elif args.sort == "mktcap":
         display_ranked = display_ranked.sort_values(
             "market_cap", ascending=False, kind="mergesort", na_position="last"
+        )
+    elif args.sort == "momentum":
+        display_ranked = display_ranked.sort_values(
+            "residual_momentum_z", ascending=False, kind="mergesort", na_position="last"
+        )
+    elif args.sort == "quality":
+        display_ranked = display_ranked.sort_values(
+            "quality_z", ascending=False, kind="mergesort", na_position="last"
+        )
+    elif args.sort == "value":
+        display_ranked = display_ranked.sort_values(
+            "value_z", ascending=False, kind="mergesort", na_position="last"
         )
     # composite is already the default sort from build_ranked.
 

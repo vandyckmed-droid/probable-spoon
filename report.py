@@ -106,7 +106,10 @@ body {
 #sort-cash:checked      ~ .sticky-top label[for="sort-cash"],
 #sort-sector:checked    ~ .sticky-top label[for="sort-sector"],
 #sort-ticker:checked    ~ .sticky-top label[for="sort-ticker"],
-#sort-mktcap:checked    ~ .sticky-top label[for="sort-mktcap"] {
+#sort-mktcap:checked    ~ .sticky-top label[for="sort-mktcap"],
+#sort-momentum:checked  ~ .sticky-top label[for="sort-momentum"],
+#sort-quality:checked   ~ .sticky-top label[for="sort-quality"],
+#sort-value:checked     ~ .sticky-top label[for="sort-value"] {
   background: rgba(255,255,255,0.08);
   color: var(--text-strong);
   border-color: rgba(255,255,255,0.12);
@@ -119,6 +122,9 @@ body {
 #sort-sector:checked    ~ .section .list .row { order: var(--r-sec, 0); }
 #sort-ticker:checked    ~ .section .list .row { order: var(--r-tick, 0); }
 #sort-mktcap:checked    ~ .section .list .row { order: var(--r-mkt, 0); }
+#sort-momentum:checked  ~ .section .list .row { order: var(--r-mom, 0); }
+#sort-quality:checked   ~ .section .list .row { order: var(--r-qual, 0); }
+#sort-value:checked     ~ .section .list .row { order: var(--r-val, 0); }
 
 /* Show-top-N toggle */
 #show-25:checked ~ .section .list .row { display: none; }
@@ -1126,6 +1132,9 @@ def _row_html(
     scheme_scales: dict,
     rank_composite: dict, rank_cash: dict, rank_sector: dict,
     rank_ticker: dict, rank_mktcap: dict,
+    rank_momentum: dict | None = None,
+    rank_quality: dict | None = None,
+    rank_value: dict | None = None,
     diagnostics: dict | None = None,
     universe_labels: dict | None = None,
 ) -> str:
@@ -1289,6 +1298,9 @@ def _row_html(
         f"--r-sec:{rank_sector.get(ticker, 0)};"
         f"--r-tick:{rank_ticker.get(ticker, 0)};"
         f"--r-mkt:{rank_mktcap.get(ticker, 0)};"
+        f"--r-mom:{(rank_momentum or {}).get(ticker, 0)};"
+        f"--r-qual:{(rank_quality or {}).get(ticker, 0)};"
+        f"--r-val:{(rank_value or {}).get(ticker, 0)};"
     )
     tags = (universe_labels or {}).get(ticker) or []
     tags_html = ""
@@ -1805,13 +1817,28 @@ def render(
             ).index.tolist()
         else:
             idx_mktcap = idx_composite
+
+        def _z_idx(col: str) -> list:
+            if col in ranked_df.columns:
+                return ranked_df.sort_values(
+                    col, ascending=False, kind="mergesort", na_position="last",
+                ).index.tolist()
+            return idx_composite
+
+        idx_momentum = _z_idx("residual_momentum_z")
+        idx_quality = _z_idx("quality_z")
+        idx_value = _z_idx("value_z")
     else:
         idx_composite = idx_cash = idx_sector = idx_ticker = idx_mktcap = []
+        idx_momentum = idx_quality = idx_value = []
     rank_composite = {t: i for i, t in enumerate(idx_composite)}
     rank_cash = {t: i for i, t in enumerate(idx_cash)}
     rank_sector = {t: i for i, t in enumerate(idx_sector)}
     rank_ticker = {t: i for i, t in enumerate(idx_ticker)}
     rank_mktcap = {t: i for i, t in enumerate(idx_mktcap)}
+    rank_momentum = {t: i for i, t in enumerate(idx_momentum)}
+    rank_quality = {t: i for i, t in enumerate(idx_quality)}
+    rank_value = {t: i for i, t in enumerate(idx_value)}
 
     # Compact page header (criteria summary + cash dropdown).
     header_bits = [f"<b>{_format_weights(weights)}</b>"]
@@ -1843,6 +1870,9 @@ def render(
     rows_html = "".join(
         _row_html(t, r, names, weights, cash, scheme_scales,
                   rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap,
+                  rank_momentum=rank_momentum,
+                  rank_quality=rank_quality,
+                  rank_value=rank_value,
                   diagnostics=diagnostics, universe_labels=universe_labels)
         for t, r in ranked_df.iterrows()
     )
@@ -1974,6 +2004,9 @@ def render(
         f'<input type="radio" name="sort" id="sort-sector" class="sort-radio"{ " checked" if initial_sort == "sector" else "" }>'
         f'<input type="radio" name="sort" id="sort-ticker" class="sort-radio"{ " checked" if initial_sort == "ticker" else "" }>'
         f'<input type="radio" name="sort" id="sort-mktcap" class="sort-radio"{ " checked" if initial_sort == "mktcap" else "" }>'
+        f'<input type="radio" name="sort" id="sort-momentum" class="sort-radio"{ " checked" if initial_sort == "momentum" else "" }>'
+        f'<input type="radio" name="sort" id="sort-quality" class="sort-radio"{ " checked" if initial_sort == "quality" else "" }>'
+        f'<input type="radio" name="sort" id="sort-value" class="sort-radio"{ " checked" if initial_sort == "value" else "" }>'
         f'<input type="radio" name="weighting" id="wt-hrp" class="sort-radio"{ " checked" if initial_scheme == "hrp" else "" }>'
         f'<input type="radio" name="weighting" id="wt-ivp" class="sort-radio"{ " checked" if initial_scheme == "ivp" else "" }>'
         f'<input type="radio" name="weighting" id="wt-equal" class="sort-radio"{ " checked" if initial_scheme == "equal" else "" }>'
@@ -1986,10 +2019,13 @@ def render(
         '<div class="toolbar">'
         '<span class="toolbar-label">Sort</span>'
         '<label for="sort-composite" class="sort-btn">Composite</label>'
+        '<label for="sort-momentum" class="sort-btn">Momentum</label>'
+        '<label for="sort-quality" class="sort-btn">Quality</label>'
+        '<label for="sort-value" class="sort-btn">Value</label>'
         '<label for="sort-cash" class="sort-btn">Cash</label>'
+        '<label for="sort-mktcap" class="sort-btn">Market Cap</label>'
         '<label for="sort-sector" class="sort-btn">Sector</label>'
         '<label for="sort-ticker" class="sort-btn">Ticker</label>'
-        '<label for="sort-mktcap" class="sort-btn">Market Cap</label>'
         '</div>'
         '</div>'
         f'{full_section}'
