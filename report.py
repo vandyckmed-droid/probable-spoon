@@ -250,6 +250,14 @@ details.row > summary::marker { display: none; }
 }
 .meta .dot { flex: 0 0 auto; opacity: 0.5; }
 .meta .sector { flex: 0 0 auto; white-space: nowrap; }
+.meta .tags { flex: 0 0 auto; display: inline-flex; gap: 4px; margin-left: 4px; }
+.meta .tag {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 1px 6px; border-radius: 4px;
+  background: #ececef; color: #4b4b50;
+  text-transform: uppercase;
+}
 .full-name {
   font-size: 13px; color: #6b6b70;
   margin-top: 10px; margin-bottom: -2px;
@@ -356,6 +364,7 @@ details.row > summary::marker { display: none; }
   .ticker { color: #ececec; }
   .meta { color: #8e8e93; }
   .meta .name { color: #ececec; }
+  .meta .tag { background: #2c2c2e; color: #aeaeb2; }
   .full-name { color: #8e8e93; }
   .rank { color: #8e8e93; }
   .expanded .divider { border-top-color: #2c2c2e; }
@@ -600,6 +609,7 @@ def _row_html(
     rank_composite: dict, rank_cash: dict, rank_sector: dict,
     rank_ticker: dict, rank_mktcap: dict,
     sparklines: dict | None = None,
+    universe_labels: dict | None = None,
 ) -> str:
     """Render one <details class=row> card for a single ticker.
 
@@ -701,6 +711,12 @@ def _row_html(
         f"--r-tick:{rank_ticker.get(ticker, 0)};"
         f"--r-mkt:{rank_mktcap.get(ticker, 0)};"
     )
+    tags = (universe_labels or {}).get(ticker) or []
+    tags_html = ""
+    if tags:
+        tag_spans = "".join(f'<span class="tag">{_escape(t)}</span>' for t in tags)
+        tags_html = f'<span class="tags">{tag_spans}</span>'
+
     show_cls = _show_classes(rank_composite.get(ticker, 9999))
     return (
         f'<details class="row {show_cls}" style="{order_style}" '
@@ -713,6 +729,7 @@ def _row_html(
         f'<span class="name">{name}</span>'
         f'<span class="dot">·</span>'
         f'<span class="sector">{sector}</span>'
+        f'{tags_html}'
         f'</span>'
         f'{cash_minis}'
         '</summary>'
@@ -792,6 +809,19 @@ _METHODOLOGY_BODY = (
     'their own buckets. expand.py uses FMP\'s screener to add the next N '
     'US-listed names by market cap, skipping anything already in the '
     'universe.</p>'
+
+    '<h3>Universe hygiene</h3>'
+    '<p>Before the pipeline runs, each ticker is classified against two '
+    'rule sets. <b>Excluded:</b> preferreds, baby bonds and notes, '
+    'warrants, rights, SPAC units, ETFs, and mutual / closed-end funds. '
+    'Detection uses both ticker-suffix patterns (catches non-common-stock '
+    'tickers regardless of profile data) and FMP profile flags (isEtf, '
+    'isFund). <b>Kept:</b> common stocks, ADRs, and foreign ordinary '
+    'shares. <b>Labelled:</b> ADRs (foreign country of incorporation or '
+    'depositary receipts), REITs (industry contains "REIT" or "Real '
+    'Estate Investment"), and MLPs (limited / master limited '
+    'partnerships). Labels show as small uppercase tags next to the '
+    'sector in each row.</p>'
 
     '<h3>Portfolio weighting</h3>'
     '<p>Three schemes are available and switchable inline:</p>'
@@ -1009,22 +1039,34 @@ def render(
     # --- Section 1: Ranking (default open) — single scrolling list with the
     # weighting toggle. Top N stocks have non-zero weights and show cash;
     # rest just show composite.
+    universe_labels = factors_used.get("universe_labels") or {}
     rows_html = "".join(
         _row_html(t, r, names, weights, cash, scheme_scales,
                   rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap,
-                  sparklines=sparklines)
+                  sparklines=sparklines, universe_labels=universe_labels)
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)
+    raw_count = factors_used.get("universe_raw_count")
+    excluded_count = len(factors_used.get("universe_excluded") or {})
     weighted_count = (ranked_df["hrp_weight"] > 0).sum() if "hrp_weight" in ranked_df.columns else 0
     weighted_suffix = f" · top {int(weighted_count)} weighted" if weighted_count else ""
     vol_suffix = f" · {vol_target*100:.0f}% vol target" if vol_target else ""
+    excluded_suffix = (
+        f" · {excluded_count} excluded" if excluded_count else ""
+    )
 
     def _make_sub(visible_n: int) -> str:
         actual = min(visible_n, len(ranked_df))
         if universe_total > actual:
-            return f"Top {actual} of {universe_total} stocks{weighted_suffix}{vol_suffix}"
-        return f"{actual} stocks{weighted_suffix}{vol_suffix}"
+            return (
+                f"Top {actual} of {universe_total} eligible"
+                f"{excluded_suffix}{weighted_suffix}{vol_suffix}"
+            )
+        return (
+            f"{actual} eligible"
+            f"{excluded_suffix}{weighted_suffix}{vol_suffix}"
+        )
 
     full_subtitle = (
         f'<span class="sub-25">{_make_sub(25)}</span>'
@@ -1077,6 +1119,32 @@ def render(
 
     backtest_section = _backtest_section_html(factors_used.get("backtest") or {})
 
+    raw_count = factors_used.get("universe_raw_count")
+    eligible_count = factors_used.get("universe_eligible_count")
+    excluded_by_reason = factors_used.get("universe_excluded_by_reason") or {}
+    counts_block = ""
+    if raw_count is not None and eligible_count is not None:
+        excluded_n = sum(len(v) for v in excluded_by_reason.values())
+        counts_block = (
+            '<h3>This run</h3>'
+            f'<p>Raw universe {raw_count} · '
+            f'eligible {eligible_count} · '
+            f'excluded {excluded_n}.</p>'
+        )
+    if excluded_by_reason:
+        parts = ['<h3>Excluded this run</h3>']
+        for reason in sorted(excluded_by_reason.keys()):
+            tickers_list = excluded_by_reason[reason]
+            parts.append(
+                f'<p><b>{_escape(reason)}</b> ({len(tickers_list)}): '
+                f'{_escape(", ".join(tickers_list))}</p>'
+            )
+        excluded_block = "".join(parts)
+    elif raw_count is not None:
+        excluded_block = '<h3>Excluded this run</h3><p>None.</p>'
+    else:
+        excluded_block = ""
+
     methodology_section = (
         '<details class="section">'
         '<summary>'
@@ -1085,7 +1153,9 @@ def render(
         '<div class="section-subtitle">Model summary, formulas, data sources</div>'
         '</div>'
         '</summary>'
-        f'<div class="section-body methodology-body">{_METHODOLOGY_BODY}</div>'
+        '<div class="section-body methodology-body">'
+        f'{counts_block}{_METHODOLOGY_BODY}{excluded_block}'
+        '</div>'
         '</details>'
     )
 

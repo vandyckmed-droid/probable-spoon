@@ -14,6 +14,9 @@ _FIELD_MAP = {
     "country": "country",
     "exchange": "exchangeShortName",
     "currency": "currency",
+    "is_etf": "isEtf",
+    "is_fund": "isFund",
+    "is_adr": "isAdr",
 }
 
 
@@ -67,7 +70,14 @@ def _fetch_one(ticker: str) -> dict | None:
     entry: dict = {"fetched": dt.date.today().isoformat()}
     for out_key, src_key in _FIELD_MAP.items():
         val = row.get(src_key)
-        entry[out_key] = val if isinstance(val, str) else ("" if val is None else str(val))
+        if isinstance(val, bool):
+            entry[out_key] = val
+        elif isinstance(val, str):
+            entry[out_key] = val
+        elif val is None:
+            entry[out_key] = ""
+        else:
+            entry[out_key] = str(val)
     return entry
 
 

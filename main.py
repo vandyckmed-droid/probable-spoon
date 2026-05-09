@@ -16,7 +16,10 @@ from config import (
     MARKET_TICKER, TOP_N, WEIGHTING_SCHEME, WEIGHT_LOOKBACK_DAYS,
     CASH_DEPLOYMENT, BETA_LOOKBACK_DAYS, VOL_TARGET, BACKTEST_DAYS,
 )
-from universe import load_sector_etf_map, ticker_to_sector
+from universe import (
+    classify_universe, exclusion_reason_label,
+    load_sector_etf_map, ticker_to_sector,
+)
 
 
 def _open_file(path: Path) -> None:
@@ -93,15 +96,15 @@ def main():
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    tickers = store.universe()
+    raw_tickers = store.universe()
     sector_etf_map = load_sector_etf_map()
     sector_etfs = list(sector_etf_map.values())
-    print(f"Universe: {len(tickers)} stocks, {len(sector_etfs)} sector ETFs.")
+    print(f"Universe: {len(raw_tickers)} stocks raw, {len(sector_etfs)} sector ETFs.")
 
     do_fetch = args.refresh or args.update
     if do_fetch:
         all_for_prices = list(
-            dict.fromkeys([MARKET_TICKER, *sector_etfs, *tickers])
+            dict.fromkeys([MARKET_TICKER, *sector_etfs, *raw_tickers])
         )
         store.ensure(
             all_for_prices,
@@ -109,12 +112,29 @@ def main():
             force=args.refresh,
         )
         store.ensure(
-            tickers,
+            raw_tickers,
             with_prices=False,
             force=args.refresh,
         )
 
-    ts = ticker_to_sector(store.profiles())
+    # Universe hygiene: drop preferreds, baby bonds/notes, warrants, rights,
+    # SPAC units, ETFs, and funds; surface ADR/REIT/MLP labels for everything
+    # else. Bootstrap behaviour: on the very first run the profile cache may
+    # be empty and only ticker-suffix patterns will fire — once profiles are
+    # cached, the next run filters cleanly.
+    profiles_data = store.profiles()
+    tickers, excluded, labels = classify_universe(raw_tickers, profiles_data)
+    print(
+        f"Eligible: {len(tickers)} (excluded {len(excluded)}: "
+        + ", ".join(sorted({exclusion_reason_label(r) for r in excluded.values()}))
+        + ")"
+        if excluded else f"Eligible: {len(tickers)}"
+    )
+
+    ts = ticker_to_sector(profiles_data)
+    # Restrict the sector map to eligible tickers so the pipeline never
+    # processes anything we just filtered out.
+    ts = {t: s for t, s in ts.items() if t in set(tickers)}
 
     prices_df, _ = store.prices()
     funds = store.fundamentals()
@@ -184,6 +204,16 @@ def main():
     }
     factors_used["sort"] = args.sort
     factors_used["universe_total"] = len(ranked)
+    factors_used["universe_raw_count"] = len(raw_tickers)
+    factors_used["universe_eligible_count"] = len(tickers)
+    factors_used["universe_excluded"] = excluded
+    factors_used["universe_labels"] = labels
+    excluded_by_reason: dict[str, list[str]] = {}
+    for _t, _reason in excluded.items():
+        excluded_by_reason.setdefault(exclusion_reason_label(_reason), []).append(_t)
+    for _label in excluded_by_reason:
+        excluded_by_reason[_label].sort()
+    factors_used["universe_excluded_by_reason"] = excluded_by_reason
 
     # Surface the latest price date so stale data is visible in the report
     # header. Uses the last index of the cached prices frame as the canonical

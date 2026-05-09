@@ -1,5 +1,6 @@
-"""Universe loading, share-class dedupe, ticker→sector resolution."""
+"""Universe loading, share-class dedupe, ticker→sector resolution, hygiene."""
 import json
+import re
 from pathlib import Path
 
 UNIVERSE_JSON = Path("data/universe.json")
@@ -133,3 +134,107 @@ def add_to_universe_extras(tickers: list[str]) -> list[str]:
     content += "\n".join(new) + "\n"
     UNIVERSE_EXTRA.write_text(content, encoding="utf-8")
     return new
+
+
+# ---------------------------------------------------------------------------
+# Universe hygiene
+#
+# Keep: common stocks, ADRs, foreign ordinary shares.
+# Exclude: preferreds, baby bonds/notes, warrants, rights, ETFs/funds,
+#          SPAC units. Duplicate share classes are already handled above.
+# Label: ADRs, REITs, MLPs.
+#
+# Detection has two layers. Ticker-suffix patterns catch cases where the
+# profile data is missing or wrong (warrants, preferreds, rights, notes,
+# units). Profile fields (isEtf / isFund / isAdr / industry / country)
+# refine the rest. Both are conservative — when in doubt, the ticker is
+# kept eligible rather than silently excluded.
+# ---------------------------------------------------------------------------
+
+_TICKER_EXCLUSIONS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(\.WS|\.W|-WS|-W)$", re.IGNORECASE),                  "warrant"),
+    (re.compile(r"(\.PR[A-Z]?|-PR[A-Z]?|\.P[A-Z]?|-P[A-Z]?)$", re.I),   "preferred"),
+    (re.compile(r"(\.RT|-RT|\.R)$", re.IGNORECASE),                     "right"),
+    (re.compile(r"(-NT|\.NT)$", re.IGNORECASE),                         "note"),
+    (re.compile(r"(\.U|-U|=U)$", re.IGNORECASE),                        "unit"),
+]
+
+_EXCLUSION_LABELS = {
+    "warrant":   "Warrants",
+    "preferred": "Preferred shares",
+    "right":     "Rights",
+    "note":      "Baby bonds / notes",
+    "unit":      "SPAC units",
+    "etf":       "ETFs",
+    "fund":      "Mutual / closed-end funds",
+}
+
+
+def _classify_one(ticker: str, profile: dict) -> tuple[str, object]:
+    """Return ('excluded', reason) or ('eligible', list_of_labels)."""
+    for rx, kind in _TICKER_EXCLUSIONS:
+        if rx.search(ticker):
+            return ("excluded", kind)
+
+    if profile:
+        if profile.get("is_etf") is True:
+            return ("excluded", "etf")
+        if profile.get("is_fund") is True:
+            return ("excluded", "fund")
+
+    labels: list[str] = []
+    if profile:
+        industry = (profile.get("industry") or "").lower()
+        name = (profile.get("company_name") or "").lower()
+        country = (profile.get("country") or "").upper()
+        is_adr_flag = profile.get("is_adr") is True
+
+        if (
+            is_adr_flag
+            or "adr" in name
+            or "depositary" in name
+            or (country and country not in ("US", "USA"))
+        ):
+            labels.append("ADR")
+        if "reit" in industry or "real estate investment" in industry:
+            labels.append("REIT")
+        if (
+            " lp" in (" " + name)
+            or "limited partnership" in name
+            or "master limited" in industry
+        ):
+            labels.append("MLP")
+
+    return ("eligible", labels)
+
+
+def classify_universe(
+    tickers: list[str], profiles_data: dict,
+) -> tuple[list[str], dict[str, str], dict[str, list[str]]]:
+    """Apply hygiene rules to a raw ticker list.
+
+    Returns:
+        eligible: tickers that pass all rules, in input order
+        excluded: {ticker: reason_key} where reason_key is one of
+                  warrant, preferred, right, note, unit, etf, fund
+        labels:   {ticker: [labels]} where labels is some combination of
+                  ADR, REIT, MLP — empty entries are omitted
+    """
+    eligible: list[str] = []
+    excluded: dict[str, str] = {}
+    labels: dict[str, list[str]] = {}
+    for t in tickers:
+        prof = profiles_data.get(t) or {}
+        status, info = _classify_one(t, prof)
+        if status == "excluded":
+            excluded[t] = info  # type: ignore[assignment]
+        else:
+            eligible.append(t)
+            if info:
+                labels[t] = info  # type: ignore[assignment]
+    return eligible, excluded, labels
+
+
+def exclusion_reason_label(key: str) -> str:
+    """Human-readable label for an exclusion reason key."""
+    return _EXCLUSION_LABELS.get(key, key.title())
