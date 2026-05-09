@@ -249,10 +249,9 @@ def main():
     # composite is already the default sort from build_ranked.
 
     names = store.company_names(display_ranked.index.tolist())
-    logos = store.company_logos(display_ranked.index.tolist())
     html = report.render(
         display_ranked, names, factors_used,
-        sparklines=sparklines, logos=logos,
+        sparklines=sparklines,
     )
     report_path = (out_dir / "report.html").resolve()
     report.write_report(html, str(report_path))

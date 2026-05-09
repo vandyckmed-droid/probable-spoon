@@ -67,16 +67,6 @@ def company_names(tickers: list[str]) -> dict[str, str]:
     return out
 
 
-def company_logos(tickers: list[str]) -> dict[str, str]:
-    """{ticker: logo_url}. Empty string when no image is cached for that ticker."""
-    data = profiles()
-    out: dict[str, str] = {}
-    for t in tickers:
-        prof = data.get(t) or {}
-        out[t] = prof.get("image") or ""
-    return out
-
-
 def add_to_universe(tickers: list[str], *, fetch: bool = True) -> list[str]:
     """Append to extras file. If fetch=True, top up all caches for the new tickers.
 

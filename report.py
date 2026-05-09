@@ -218,7 +218,7 @@ details.section[open] > summary::after { transform: rotate(-135deg); }
 .section-body .list-header {
   padding: 6px 4px 10px;
   display: grid;
-  grid-template-columns: 22px 28px 1fr 56px 70px;
+  grid-template-columns: 24px 1fr 56px 70px;
   column-gap: 10px;
   font-size: 10px; font-weight: 600;
   color: var(--text-faint);
@@ -226,8 +226,8 @@ details.section[open] > summary::after { transform: rotate(-135deg); }
   user-select: none; -webkit-user-select: none;
 }
 .section-body .list-header .col-rank { text-align: center; grid-column: 1; }
-.section-body .list-header .col-name { grid-column: 3; }
-.section-body .list-header .col-comp { text-align: right; grid-column: 5; }
+.section-body .list-header .col-name { grid-column: 2; }
+.section-body .list-header .col-comp { text-align: right; grid-column: 4; }
 
 /* Backtest table */
 .bt-table { display: flex; flex-direction: column; font-size: 13px; }
@@ -285,7 +285,7 @@ details.row > summary {
   list-style: none; cursor: pointer;
   padding: 12px 14px;
   display: grid;
-  grid-template-columns: 22px 28px 1fr 56px 70px;
+  grid-template-columns: 24px 1fr 56px 70px;
   grid-template-rows: auto auto;
   column-gap: 10px;
   row-gap: 3px;
@@ -301,22 +301,8 @@ details.row > summary::marker { display: none; }
   font-variant-numeric: tabular-nums; text-align: center;
 }
 
-/* Circular logo */
-.logo {
-  grid-row: 1 / span 2; grid-column: 2;
-  align-self: center;
-  display: inline-block;
-  width: 28px; height: 28px;
-  border-radius: 50%;
-  background-color: var(--bg-elev);
-  background-size: 70% 70%;
-  background-position: center;
-  background-repeat: no-repeat;
-  border: 1px solid var(--line);
-}
-
 .ticker {
-  grid-row: 1; grid-column: 3;
+  grid-row: 1; grid-column: 2;
   font-weight: 600; font-size: 16px;
   letter-spacing: -0.01em;
   color: var(--text-strong);
@@ -324,7 +310,7 @@ details.row > summary::marker { display: none; }
 
 /* Composite pill — outlined bezel with soft glow */
 .pill {
-  grid-row: 1; grid-column: 5;
+  grid-row: 1; grid-column: 4;
   justify-self: end;
   font-family: var(--tabular);
   font-variant-numeric: tabular-nums;
@@ -359,7 +345,7 @@ details.row > summary::marker { display: none; }
 }
 
 .cash-mini {
-  grid-row: 2; grid-column: 5;
+  grid-row: 2; grid-column: 4;
   justify-self: end; text-align: right;
   font-family: var(--tabular);
   font-size: 11px; color: var(--text-muted);
@@ -370,7 +356,7 @@ details.row > summary::marker { display: none; }
 
 /* Mini sparkline next to each row */
 .mini-spark-cell {
-  grid-row: 1 / span 2; grid-column: 4;
+  grid-row: 1 / span 2; grid-column: 3;
   align-self: center; justify-self: center;
 }
 svg.mini-spark {
@@ -380,7 +366,7 @@ svg.mini-spark {
 }
 
 .meta {
-  grid-row: 2; grid-column: 3;
+  grid-row: 2; grid-column: 2;
   font-size: 12px; color: var(--text-muted);
   display: flex; align-items: baseline; gap: 5px;
   min-width: 0;
@@ -765,7 +751,6 @@ def _row_html(
     rank_ticker: dict, rank_mktcap: dict,
     sparklines: dict | None = None,
     universe_labels: dict | None = None,
-    logos: dict | None = None,
 ) -> str:
     """Render one <details class=row> card for a single ticker.
 
@@ -863,17 +848,6 @@ def _row_html(
                 '</div>'
             )
 
-    logo_url = (logos or {}).get(ticker, "")
-    if logo_url:
-        safe_url = (
-            logo_url.replace("'", "%27").replace('"', "%22")
-            .replace("<", "%3C").replace(">", "%3E")
-        )
-        logo_html = (
-            f'<span class="logo" style="background-image:url(\'{safe_url}\')"></span>'
-        )
-    else:
-        logo_html = '<span class="logo"></span>'
 
     order_style = (
         f"--r-c:{rank_composite.get(ticker, 0)};"
@@ -894,7 +868,6 @@ def _row_html(
         f'data-eq="{eq_w}" data-ivp="{ivp_w}" data-hrp="{hrp_w}">'
         '<summary>'
         f'<span class="rank">{rank}</span>'
-        f'{logo_html}'
         f'<span class="ticker">{ticker_esc}</span>'
         f'<span class="pill {pill_cls}">{composite_text}</span>'
         f'<span class="meta">'
@@ -1135,7 +1108,6 @@ except ImportError:
 def render(
     ranked_df: pd.DataFrame, names: dict, factors_used: dict,
     sparklines: dict | None = None,
-    logos: dict | None = None,
 ) -> str:
     weights = factors_used.get("weights", {})
     scheme = factors_used.get("weighting_scheme", "")
@@ -1217,8 +1189,7 @@ def render(
     rows_html = "".join(
         _row_html(t, r, names, weights, cash, scheme_scales,
                   rank_composite, rank_cash, rank_sector, rank_ticker, rank_mktcap,
-                  sparklines=sparklines, universe_labels=universe_labels,
-                  logos=logos)
+                  sparklines=sparklines, universe_labels=universe_labels)
         for t, r in ranked_df.iterrows()
     )
     universe_total = factors_used.get("universe_total") or len(ranked_df)
