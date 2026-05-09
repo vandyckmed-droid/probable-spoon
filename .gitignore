@@ -2,4 +2,5 @@ __pycache__/
 *.pyc
 cache/
 reports/
+snapshots/
 .pytest_cache/

@@ -66,6 +66,14 @@ REVISIONS_REFRESH_DAYS    = 7
 EXP_GROWTH_W              = 0.50  # forward EPS growth weight
 EXP_SURPRISE_W            = 0.50  # latest earnings surprise weight
 
+# Snapshot archive — quiet background log of each model run. Version-aware
+# so dev tweaks don't masquerade as a stable strategy history.
+MQV_STRATEGY_NAME = "mqv"
+MQV_VERSION       = "0.4-dev"   # bump on any formula / weight change
+MQV_STABLE        = False       # set True only when the model is frozen
+SNAPSHOTS_DIR     = "snapshots"
+SNAPSHOTS_INDEX_LIMIT = 20      # how many recent snapshots the report lists
+
 # Universe / market
 MARKET_TICKER = "VTI"
 

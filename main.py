@@ -12,6 +12,7 @@ import pandas as pd
 
 import analytics
 import report
+import snapshots
 import store
 import weights as weights_mod
 from config import (
@@ -418,6 +419,22 @@ def main():
     # CSV always carries the full ranked frame, untruncated and unsorted-by-flag.
     report.write_csv(ranked, str((out_dir / "ranked_stocks.csv").resolve()))
     print(f"Ranked {len(display_ranked)} of {len(ranked)} tickers → {report_path}")
+
+    # Append-only snapshot archive — quiet background record. Failures here
+    # never block the report; save_snapshot returns None and prints a warning.
+    snap_path = snapshots.save_snapshot(
+        ranked=ranked,
+        top_n=top_n,
+        factors_used=factors_used,
+        raw_tickers=raw_tickers,
+        active_tickers=tickers,
+        excluded=excluded,
+        profiles_data=profiles_data,
+        labels=labels,
+        prices_as_of=factors_used.get("prices_as_of"),
+    )
+    if snap_path is not None:
+        print(f"Snapshot saved → {snap_path}")
 
     if not args.no_open:
         _open_file(report_path)

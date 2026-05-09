@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pandas as pd
 
+import snapshots
+
 
 _CSS = """
 * { box-sizing: border-box; }
@@ -573,6 +575,61 @@ svg.sparkline {
   padding: 2px 7px; border: 1px solid var(--line);
   border-radius: 4px;
 }
+
+/* Snapshot archive — small status drawer at the bottom of the page */
+.snap-archive {
+  margin-top: 18px;
+  padding: 8px 12px;
+  border-top: 1px dashed var(--line);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.snap-archive > summary {
+  cursor: pointer; list-style: none;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  user-select: none; -webkit-user-select: none;
+}
+.snap-archive > summary::-webkit-details-marker { display: none; }
+.snap-archive > summary::before {
+  content: '\\203A'; color: var(--text-faint);
+  margin-right: 6px; display: inline-block;
+  transition: transform 0.15s;
+}
+.snap-archive[open] > summary::before { transform: rotate(90deg); }
+.snap-note {
+  font-size: 11px; color: var(--text-faint);
+  margin: 8px 0 6px; font-style: italic;
+}
+.snap-empty {
+  font-size: 11px; color: var(--text-faint);
+  margin: 8px 0; font-style: italic;
+}
+.snap-empty code, .snap-archive code {
+  font-family: var(--tabular);
+  background: var(--bg-elev);
+  padding: 1px 4px; border-radius: 3px;
+}
+.snap-list {
+  display: flex; flex-direction: column;
+  gap: 2px;
+  font-family: var(--tabular);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  margin-top: 6px;
+}
+.snap-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  column-gap: 12px;
+  padding: 2px 0;
+}
+.snap-ts { color: var(--text-muted); }
+.snap-ver {
+  color: var(--text-faint);
+  text-transform: lowercase;
+}
+.snap-meta { color: var(--text-faint); text-align: right; }
 """
 
 
@@ -1385,6 +1442,60 @@ except ImportError:
     MARKET_TICKER_LABEL = "Market"
 
 
+def _snapshot_archive_html() -> str:
+    """Tiny collapsed status line at the bottom of the page.
+
+    Reads only metadata.json from each snapshot dir, never the CSVs, so this
+    is cheap to call. Surfaces latest timestamp + version + active count and
+    the last N entries inside the drawer.
+    """
+    import config as _config
+    limit = int(getattr(_config, "SNAPSHOTS_INDEX_LIMIT", 20))
+    entries = snapshots.list_snapshots(limit=limit)
+    if not entries:
+        return (
+            '<details class="snap-archive">'
+            '<summary>Snapshot archive · none yet</summary>'
+            '<p class="snap-empty">Snapshots are saved automatically after '
+            'every run to <code>snapshots/</code>. Run main.py once to '
+            'create the first one.</p>'
+            '</details>'
+        )
+    latest = entries[0]
+    ts = (latest.get("timestamp") or "").replace("T", " ")[:16]
+    summary = (
+        f'Snapshot archive · {len(entries)} listed · '
+        f'last {ts or "unknown"} · '
+        f'v{latest.get("version") or "?"} '
+        f'({"stable" if latest.get("stable") else "dev"})'
+    )
+    rows = []
+    for e in entries:
+        ets = (e.get("timestamp") or "").replace("T", " ")[:16]
+        ver = e.get("version") or "?"
+        stab = "stable" if e.get("stable") else "dev"
+        active = e.get("active") if e.get("active") is not None else "—"
+        topn = e.get("top_n") if e.get("top_n") is not None else "—"
+        rows.append(
+            '<div class="snap-row">'
+            f'<span class="snap-ts">{_escape(ets or "—")}</span>'
+            f'<span class="snap-ver">v{_escape(str(ver))} {stab}</span>'
+            f'<span class="snap-meta">active={active} top={topn}</span>'
+            '</div>'
+        )
+    body = (
+        '<p class="snap-note">Background data collection. '
+        'Dev snapshots are not comparable to future stable snapshots.</p>'
+        f'<div class="snap-list">{"".join(rows)}</div>'
+    )
+    return (
+        '<details class="snap-archive">'
+        f'<summary>{_escape(summary)}</summary>'
+        f'{body}'
+        '</details>'
+    )
+
+
 def render(
     ranked_df: pd.DataFrame, names: dict, factors_used: dict,
     sparklines: dict | None = None,
@@ -1622,6 +1733,7 @@ def render(
         f'{universe_section}'
         f'{backtest_section}'
         f'{methodology_section}'
+        f'{_snapshot_archive_html()}'
         f'{js_block}'
         '</body></html>'
     )
