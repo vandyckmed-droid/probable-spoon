@@ -92,6 +92,18 @@ SECTOR_PRICES_CACHE         = "cache/sector_prices.pkl"
 SECTOR_PRICES_REFRESH_DAYS  = 1
 SECTOR_OUTPUT_DIR           = "out"
 
+# Phone build (sector_snack.py). The Snack save API mints a fresh link on every
+# publish, so a link that survives a data refresh needs the numbers to live at a
+# URL the app fetches at run time rather than baked into the bundle. Point this
+# at the published sector_feed.json; leave it empty and the app simply runs on
+# the snapshot baked in at build time.
+SECTOR_FEED_URL             = (
+    "https://raw.githubusercontent.com/"
+    "vandyckmed-droid/sector-feed/main/sector_feed.json"
+)
+SECTOR_FEED_TIMEOUT_MS      = 6000       # then fall back to the baked snapshot
+SECTOR_FEED_FILE            = "feed/sector_feed.json"   # tracked: this is what gets published
+
 # Universe / market
 MARKET_TICKER = "VTI"
 

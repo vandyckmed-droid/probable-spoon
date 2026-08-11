@@ -28,17 +28,48 @@ refresh daily.
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
+**Live link: https://snack.expo.dev/c1_6AchNu_NhrhsJOUdDx** — open it in Expo
+Go, or scan the QR on that page. Treat it as the address of the app: it only
+moves if the *code* is republished, which a data refresh no longer requires.
+
 ```bash
-python3 sector_snack.py            # write out/App.js
+python3 sector_snack.py            # write feed/sector_feed.json + out/App.js
 python3 sector_snack.py --publish  # ...and upload, printing the links
+python3 sector_snack.py --feed-url ''   # build a bundle that never phones home
 ```
 
 The 11 x 25 heatmap does not survive a phone screen, so the phone build
 inverts it: a tappable list of sectors, each opening into its own 25 names as
 rows — ticker, company name, score — with a colour bar on the same
-within-sector z. Data is baked into the bundle, so the app needs no network
-once loaded, and it reads the phone's colour scheme. Pure React Native
-primitives — no dependencies for Expo Go to resolve.
+within-sector z. It reads the phone's colour scheme, and uses pure React
+Native primitives — no dependencies for Expo Go to resolve.
+
+### Why the numbers are fetched, not baked
+
+The Snack save API mints a fresh `hashId` on every call; there is no way to
+update an anonymous Snack in place (verified — passing the existing `id` or
+`hashId` back just creates another Snack). So a bundle carrying its own numbers
+means a new link on every refresh, and a phone pointed at yesterday's link
+quietly going stale.
+
+The bundle therefore carries two things: `BAKED`, the snapshot as of publish,
+and `FEED`, a URL to look for something newer (`config.SECTOR_FEED_URL`, empty
+to disable). On mount — and on pull-to-refresh — it races the fetch against
+`SECTOR_FEED_TIMEOUT_MS` and only swaps in the result if it passes a shape
+check. A 404, a timeout, junk JSON or no signal all land on the same fallback:
+the baked snapshot, with the reason and the as-of date on screen. The date
+renders in *every* state, including mid-fetch; a screen of undated numbers is
+worse than a visibly stale one.
+
+`feed/sector_feed.json` is that feed, byte-identical to what gets baked in, so
+a phone on the feed and a phone offline render the same screen. It is tracked
+rather than written to `out/` because it is the artifact that gets published —
+and its history is what a "what moved this week" view would read.
+
+Publishing it is a copy into any public URL; `SECTOR_FEED_URL` currently points
+at `raw.githubusercontent.com/vandyckmed-droid/sector-feed/main/`, which serves
+`access-control-allow-origin: *` and a 5-minute cache. Until that file exists
+the app runs on the baked snapshot and says so.
 
 The screen is written for a reader who does not know the vocabulary. Sectors
 carry a plain gloss ("chips, software, hardware") and a verdict word
@@ -50,8 +81,13 @@ window, observation count and as-of date stay in that panel as a mono stamp.
 
 `tests/test_sector_snack.py` covers the payload → `App.js` step: every sector
 and name survives, unscorable names stay as nulls, the basket size is
-data-driven rather than a hardcoded 25, and the bundle imports nothing beyond
-`react` and `react-native`.
+data-driven rather than a hardcoded 25, feed and baked snapshot are the same
+object, and the bundle imports nothing beyond `react` and `react-native`.
+
+The rendered bundle was also driven through a headless React renderer against
+four feeds — good, 404, junk JSON, and one that never responds — confirming it
+shows the sector list, opens exactly one name list at a time, goes live on a
+good feed, and falls back with the date visible on the other three.
 
 ## Universe
 

@@ -43,13 +43,20 @@ SECTOR_GLOSS = {
 }
 
 APP_TEMPLATE = r"""
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   SafeAreaView, ScrollView, View, Text, Pressable, useColorScheme,
-  StatusBar, Platform,
+  StatusBar, Platform, RefreshControl,
 } from 'react-native';
 
-const DATA = __DATA__;
+// The numbers baked in when this bundle was published — the offline fallback,
+// and the whole story when no feed is configured.
+const BAKED = __DATA__;
+
+// Where to look for fresher numbers. Keeping the numbers out of the bundle is
+// what lets this link stay valid: the code never changes, so it never needs
+// republishing, so the link never moves.
+const FEED = __FEED__;
 
 const LIGHT = {
   ground: '#f6f7f6', surface: '#ffffff', ink: '#14201d', muted: '#5d6c68',
@@ -229,7 +236,29 @@ function Legend({ t }) {
   );
 }
 
-function Details({ t, open, onToggle }) {
+function Freshness({ state, asOf, t }) {
+  // The as-of date shows in every state, including while the feed is in flight —
+  // a screen of numbers with no date on it is worse than a slightly stale one.
+  const line = {
+    baked: 'Numbers from ' + asOf + '.',
+    checking: 'Showing ' + asOf + ' — checking for newer…',
+    live: 'Up to date — numbers from ' + asOf + '.',
+    stale: 'Offline, so showing the saved numbers from ' + asOf + '.',
+  }[state];
+  const dot = { baked: t.faint, checking: t.faint, live: t.pos, stale: t.neg }[state];
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dot, marginRight: 7 }} />
+      <Text style={{ color: t.faint, fontSize: 12, flex: 1, lineHeight: 17 }}>
+        {line}
+        {FEED.url ? ' Pull down to refresh.' : ''}
+      </Text>
+    </View>
+  );
+}
+
+function Details({ t, open, onToggle, meta }) {
   return (
     <View
       style={{
@@ -251,7 +280,7 @@ function Details({ t, open, onToggle }) {
       </Pressable>
 
       {open &&
-        DATA.meta.details.map((d) => (
+        meta.details.map((d) => (
           <View key={d.title} style={{ marginTop: 12 }}>
             <Text style={{ color: t.ink, fontSize: 12, fontWeight: '600' }}>{d.title}</Text>
             <Text style={{ color: t.muted, fontSize: 12, lineHeight: 18, marginTop: 3 }}>
@@ -262,11 +291,16 @@ function Details({ t, open, onToggle }) {
 
       {open && (
         <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 10, lineHeight: 15, marginTop: 12 }}>
-          {DATA.meta.stamp}
+          {meta.stamp}
         </Text>
       )}
     </View>
   );
+}
+
+/** A feed is only usable if it carries the shape the screen renders. */
+function usable(d) {
+  return !!(d && d.meta && d.meta.asOf && Array.isArray(d.sectors) && d.sectors.length);
 }
 
 export default function App() {
@@ -274,7 +308,37 @@ export default function App() {
   const t = dark ? DARK : LIGHT;
   const [open, setOpen] = useState(null);
   const [how, setHow] = useState(false);
-  const peak = Math.max(...DATA.sectors.map((s) => Math.abs(s.score)));
+  const [data, setData] = useState(BAKED);
+  const [state, setState] = useState(FEED.url ? 'checking' : 'baked');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback((manual) => {
+    if (!FEED.url) return;
+    if (manual) setBusy(true);
+    else setState('checking');
+
+    // No AbortController needed: a losing race just leaves the old numbers up.
+    const giveUp = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('timed out')), FEED.timeoutMs)
+    );
+    const ask = fetch(FEED.url, { headers: { 'Cache-Control': 'no-cache' } }).then((r) => {
+      if (!r.ok) throw new Error('http ' + r.status);
+      return r.json();
+    });
+
+    Promise.race([ask, giveUp])
+      .then((fresh) => {
+        if (!usable(fresh)) throw new Error('unusable feed');
+        setData(fresh);
+        setState('live');
+      })
+      .catch(() => setState('stale'))
+      .finally(() => setBusy(false));
+  }, []);
+
+  useEffect(() => { load(false); }, [load]);
+
+  const peak = Math.max(...data.sectors.map((s) => Math.abs(s.score)));
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.ground }}>
@@ -282,24 +346,31 @@ export default function App() {
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          FEED.url ? (
+            <RefreshControl refreshing={busy} onRefresh={() => load(true)} tintColor={t.faint} />
+          ) : undefined
+        }
       >
         <Text style={{ color: t.faint, fontSize: 11, letterSpacing: 1.2, textTransform: 'uppercase' }}>
-          US shares · {DATA.meta.asOf}
+          US shares
         </Text>
         <Text style={{ color: t.ink, fontSize: 28, fontWeight: '700', marginTop: 6, lineHeight: 33 }}>
           Which corners of the{'\n'}market are climbing?
         </Text>
         <Text style={{ color: t.muted, fontSize: 14, marginTop: 12, lineHeight: 21 }}>
-          {DATA.meta.blurb}
+          {data.meta.blurb}
         </Text>
+
+        <Freshness state={state} asOf={data.meta.asOf} t={t} />
 
         <Legend t={t} />
 
         <View style={{ height: 18 }} />
 
-        <Details t={t} open={how} onToggle={() => setHow(!how)} />
+        <Details t={t} open={how} onToggle={() => setHow(!how)} meta={data.meta} />
 
-        {DATA.sectors.map((s) => (
+        {data.sectors.map((s) => (
           <SectorCard
             key={s.name}
             s={s}
@@ -311,7 +382,7 @@ export default function App() {
         ))}
 
         <Text style={{ color: t.faint, fontSize: 11, lineHeight: 17, marginTop: 8 }}>
-          {DATA.meta.footer}
+          {data.meta.footer}
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -462,9 +533,18 @@ def pretty_date(iso: str) -> str:
         return iso
 
 
-def render_app(payload: dict) -> str:
+def render_app(payload: dict, *, feed_url: str = "") -> str:
     data = json.dumps(build_data(payload), separators=(",", ":"))
-    return APP_TEMPLATE.replace("__DATA__", data).lstrip("\n")
+    feed = json.dumps(
+        {"url": feed_url or "", "timeoutMs": config.SECTOR_FEED_TIMEOUT_MS},
+        separators=(",", ":"),
+    )
+    return (
+        APP_TEMPLATE
+        .replace("__DATA__", data)
+        .replace("__FEED__", feed)
+        .lstrip("\n")
+    )
 
 
 def publish(source: str, *, name: str, description: str) -> dict:
@@ -490,6 +570,11 @@ def publish(source: str, *, name: str, description: str) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--publish", action="store_true", help="upload to snack.expo.dev")
+    ap.add_argument(
+        "--feed-url",
+        default=config.SECTOR_FEED_URL,
+        help="URL the app polls for fresher numbers (default: config.SECTOR_FEED_URL)",
+    )
     args = ap.parse_args()
 
     src = Path(config.SECTOR_OUTPUT_DIR) / "sector_etf_ranking.json"
@@ -498,10 +583,28 @@ def main() -> None:
     with open(src, encoding="utf-8") as f:
         payload = json.load(f)
 
-    source = render_app(payload)
-    out = Path(config.SECTOR_OUTPUT_DIR) / "App.js"
+    out_dir = Path(config.SECTOR_OUTPUT_DIR)
+
+    # The feed and the baked snapshot are the same object, so a phone running
+    # the published bundle and one running off the feed render identically.
+    # It lands in a tracked directory, not out/: this file is the thing that
+    # gets published, and its history is what a "what moved this week" view
+    # would eventually read.
+    feed = Path(config.SECTOR_FEED_FILE)
+    feed.parent.mkdir(parents=True, exist_ok=True)
+    feed.write_text(
+        json.dumps(build_data(payload), separators=(",", ":")), encoding="utf-8"
+    )
+    print(f"wrote {feed} ({feed.stat().st_size:,} bytes)")
+
+    source = render_app(payload, feed_url=args.feed_url)
+    out = out_dir / "App.js"
     out.write_text(source, encoding="utf-8")
     print(f"wrote {out} ({len(source):,} bytes)")
+    if args.feed_url:
+        print(f"feed url   {args.feed_url}")
+    else:
+        print("feed url   (none — the app runs on the baked snapshot)")
 
     if args.publish:
         try:

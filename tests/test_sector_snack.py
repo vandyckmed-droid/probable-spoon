@@ -132,13 +132,55 @@ def test_render_bakes_the_data_into_the_bundle():
 
     assert "__DATA__" not in src
     assert src.startswith("import React")
-    baked = json.loads(re.search(r"^const DATA = (.*);$", src, re.M).group(1))
+    baked = json.loads(re.search(r"^const BAKED = (.*);$", src, re.M).group(1))
     assert len(baked["sectors"]) == 2
 
 
 def test_render_has_no_dependencies_to_resolve():
     """Expo Go must load it with nothing to install."""
     src = sector_snack.render_app(_payload())
-    imports = re.findall(r"from '([^']+)'", src)
+    # Anchored on the statement terminator so prose containing "from '" is skipped.
+    imports = re.findall(r"from '([^']+)';\s*$", src, re.M)
 
-    assert set(imports) <= {"react", "react-native"}
+    assert imports                                            # the regex still finds them
+    assert set(imports) == {"react", "react-native"}
+
+
+# ---------- the live feed ----------
+
+def _feed_const(src):
+    return json.loads(re.search(r"^const FEED = (.*);$", src, re.M).group(1))
+
+
+def test_feed_url_is_baked_in_when_given():
+    src = sector_snack.render_app(_payload(), feed_url="https://example.test/f.json")
+    feed = _feed_const(src)
+
+    assert "__FEED__" not in src
+    assert feed["url"] == "https://example.test/f.json"
+    assert feed["timeoutMs"] == config.SECTOR_FEED_TIMEOUT_MS
+
+
+def test_no_feed_url_leaves_the_app_on_the_baked_snapshot():
+    src = sector_snack.render_app(_payload())
+
+    assert _feed_const(src)["url"] == ""
+    assert "__FEED__" not in src
+
+
+def test_feed_and_baked_snapshot_are_the_same_object():
+    """A phone on the feed and a phone offline must render identically."""
+    payload = _payload()
+    src = sector_snack.render_app(payload, feed_url="https://example.test/f.json")
+    baked = json.loads(re.search(r"^const BAKED = (.*);$", src, re.M).group(1))
+
+    assert baked == sector_snack.build_data(payload)
+
+
+def test_the_app_guards_against_a_broken_feed():
+    """A 404, a timeout or junk JSON must not blank the screen."""
+    src = sector_snack.render_app(_payload(), feed_url="https://example.test/f.json")
+
+    assert "function usable(" in src           # shape check before the feed is trusted
+    assert "useState(BAKED)" in src            # the snapshot is what it starts from
+    assert ".catch(() => setState('stale'))" in src
