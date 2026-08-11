@@ -2,8 +2,9 @@
 
 The heatmap does not survive a phone screen as an 11 x 25 grid, so the phone
 build inverts it: a tappable list of sectors, each opening into its own 25
-names shaded on the same within-sector z. Data is baked into the bundle, so
-the app needs no network once Expo Go has loaded it.
+names as rows shaded on the same within-sector z. Labels are written in plain
+words with the maths tucked behind a "How this works" panel, and the data is
+baked into the bundle, so the app needs no network once Expo Go has loaded it.
 
     python3 sector_snack.py            # write out/App.js
     python3 sector_snack.py --publish  # ...and push it to snack.expo.dev
@@ -20,9 +21,25 @@ SNACK_SAVE_URL = "https://exp.host/--/api/v2/snack/save"
 SNACK_SDK_VERSION = "57.0.0"
 
 SHORT_NAMES = {
-    "Communication Services": "Comm. Services",
-    "Consumer Cyclical": "Consumer Cyc.",
-    "Consumer Defensive": "Consumer Def.",
+    "Communication Services": "Communication",
+    "Consumer Cyclical": "Consumer — wants",
+    "Consumer Defensive": "Consumer — needs",
+    "Basic Materials": "Materials",
+}
+
+# Plain-word gloss for each sector, so the list reads without a finance degree.
+SECTOR_GLOSS = {
+    "Technology": "chips, software, hardware",
+    "Industrials": "machinery, aerospace, transport",
+    "Energy": "oil, gas, drilling, pipelines",
+    "Basic Materials": "metals, mining, chemicals",
+    "Consumer Defensive": "food, drink, household staples",
+    "Consumer Cyclical": "cars, retail, travel, leisure",
+    "Real Estate": "landlords and property owners",
+    "Healthcare": "drugs, devices, insurers, hospitals",
+    "Communication Services": "telecom, media, internet",
+    "Utilities": "power, water, gas networks",
+    "Financial Services": "banks, insurers, payments",
 }
 
 APP_TEMPLATE = r"""
@@ -36,15 +53,17 @@ const DATA = __DATA__;
 
 const LIGHT = {
   ground: '#f6f7f6', surface: '#ffffff', ink: '#14201d', muted: '#5d6c68',
-  rule: '#dfe4e1', ruleSoft: '#ecefed', pos: '#1d6b5f', neg: '#a64a32',
-  n3: '#e5b09c', n2: '#eec9b9', n1: '#f5e0d6', z0: '#e9eeec',
-  p1: '#d5e8e3', p2: '#b0d8ce', p3: '#86c4b6', na: '#e4e8e6',
+  faint: '#8a9994', rule: '#dfe4e1', ruleSoft: '#ecefed',
+  pos: '#1d6b5f', neg: '#a64a32',
+  n3: '#c9765c', n2: '#ddA48d', n1: '#eecdbe', z0: '#dde3e0',
+  p1: '#bcdcd4', p2: '#8ec8ba', p3: '#4fa694', na: '#e4e8e6',
 };
 const DARK = {
   ground: '#0f1513', surface: '#161e1c', ink: '#e6ece9', muted: '#8fa09b',
-  rule: '#26302e', ruleSoft: '#1d2624', pos: '#58bfad', neg: '#d8735a',
-  n3: '#6b3527', n2: '#4f2b21', n1: '#33221d', z0: '#1d2624',
-  p1: '#1e3b36', p2: '#235349', p3: '#2c6f61', na: '#1a201f',
+  faint: '#6d7d78', rule: '#26302e', ruleSoft: '#1d2624',
+  pos: '#58bfad', neg: '#d8735a',
+  n3: '#a4523b', n2: '#7b3d2c', n1: '#4a2c22', z0: '#2a3432',
+  p1: '#204740', p2: '#2b6a5c', p3: '#3f9482', na: '#1a201f',
 };
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
@@ -60,14 +79,24 @@ function shade(z) {
   return 'p3';
 }
 
-const pct = (x) => (x === null || x === undefined ? '—' : (x * 100).toFixed(1) + '%');
+// Plain-word verdict for a sector's score, so the ranking reads without maths.
+function verdict(score) {
+  if (score >= 1.75) return 'Climbing hard';
+  if (score >= 1.0) return 'Climbing steadily';
+  if (score >= 0.4) return 'Drifting up';
+  if (score > -0.4) return 'Going nowhere';
+  if (score > -1.0) return 'Drifting down';
+  return 'Falling';
+}
+
+const pct = (x) => (x === null || x === undefined ? '—' : Math.round(x * 100) + '%');
 const signed = (x) => (x >= 0 ? '+' : '') + x.toFixed(2);
 
 function Bar({ score, peak, t }) {
   const frac = Math.min(Math.abs(score) / peak, 1);
   const up = score >= 0;
   return (
-    <View style={{ flexDirection: 'row', height: 6, marginTop: 10 }}>
+    <View style={{ flexDirection: 'row', height: 6, marginTop: 12 }}>
       <View style={{ flex: 1, alignItems: 'flex-end' }}>
         {!up && (
           <View style={{ width: (frac * 100) + '%', height: 6, borderRadius: 1, backgroundColor: t.neg }} />
@@ -86,31 +115,34 @@ function Bar({ score, peak, t }) {
 function Stat({ label, value, t, tone }) {
   return (
     <View style={{ flex: 1 }}>
-      <Text style={{ color: t.muted, fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase' }}>
-        {label}
-      </Text>
-      <Text style={{ color: tone || t.ink, fontFamily: MONO, fontSize: 13, marginTop: 2 }}>
+      <Text style={{ color: t.faint, fontSize: 10, lineHeight: 13 }}>{label}</Text>
+      <Text style={{ color: tone || t.ink, fontFamily: MONO, fontSize: 14, marginTop: 3 }}>
         {value}
       </Text>
     </View>
   );
 }
 
-function Chip({ c, t }) {
+function NameRow({ c, t, last }) {
+  const tone = c.score === null ? t.muted : c.score < 0 ? t.neg : t.pos;
   return (
     <View
       style={{
-        backgroundColor: t[shade(c.z)],
-        borderRadius: 3,
-        paddingVertical: 5,
-        paddingHorizontal: 7,
-        margin: 2,
-        minWidth: 62,
+        flexDirection: 'row',
         alignItems: 'center',
+        paddingVertical: 7,
+        borderBottomWidth: last ? 0 : 1,
+        borderBottomColor: t.ruleSoft,
       }}
     >
-      <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11 }}>{c.ticker}</Text>
-      <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 9, marginTop: 1 }}>
+      <View style={{ width: 4, height: 22, borderRadius: 2, backgroundColor: t[shade(c.z)] }} />
+      <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 12, width: 58, marginLeft: 9 }}>
+        {c.ticker}
+      </Text>
+      <Text style={{ color: t.muted, fontSize: 12, flex: 1 }} numberOfLines={1}>
+        {c.name}
+      </Text>
+      <Text style={{ color: tone, fontFamily: MONO, fontSize: 12, marginLeft: 8 }}>
         {c.score === null ? '—' : signed(c.score)}
       </Text>
     </View>
@@ -126,42 +158,53 @@ function SectorCard({ s, peak, t, open, onToggle }) {
         backgroundColor: t.surface,
         borderColor: t.rule,
         borderWidth: 1,
-        borderRadius: 6,
+        borderRadius: 8,
         padding: 14,
         marginBottom: 10,
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-        <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 12, width: 22 }}>{s.rank}</Text>
-        <Text style={{ color: t.ink, fontSize: 17, fontWeight: '600', flex: 1 }}>{s.name}</Text>
-        <Text style={{ color: tone, fontFamily: MONO, fontSize: 17, fontWeight: '700' }}>
+        <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 12, width: 22 }}>{s.rank}</Text>
+        <Text style={{ color: t.ink, fontSize: 18, fontWeight: '600', flex: 1 }}>{s.name}</Text>
+        <Text style={{ color: tone, fontFamily: MONO, fontSize: 18, fontWeight: '700' }}>
           {signed(s.score)}
         </Text>
       </View>
 
+      <View style={{ flexDirection: 'row', marginLeft: 22, marginTop: 3 }}>
+        <Text style={{ color: t.faint, fontSize: 12, flex: 1 }} numberOfLines={1}>
+          {s.gloss}
+        </Text>
+        <Text style={{ color: tone, fontSize: 12, marginLeft: 8 }}>{verdict(s.score)}</Text>
+      </View>
+
       <Bar score={s.score} peak={peak} t={t} />
 
-      <View style={{ flexDirection: 'row', marginTop: 12, gap: 8 }}>
-        <Stat label="Ann ret" value={pct(s.ret)} t={t} tone={s.ret < 0 ? t.neg : t.ink} />
-        <Stat label="Ann vol" value={pct(s.vol)} t={t} />
-        <Stat label="Breadth" value={Math.round(s.breadth * 100) + '%'} t={t} />
-        <Stat label="SPDR" value={s.etfScore === null ? '—' : signed(s.etfScore) + ' ' + s.etf} t={t} />
+      <View style={{ flexDirection: 'row', marginTop: 14, gap: 8 }}>
+        <Stat label={'Gain over' + '\n' + 'the year'} value={pct(s.ret)} t={t} tone={s.ret < 0 ? t.neg : t.ink} />
+        <Stat label={'Typical' + '\n' + 'swing'} value={pct(s.vol)} t={t} />
+        <Stat label={'Names' + '\n' + 'rising'} value={s.rising + ' of ' + s.n} t={t} />
+        <Stat
+          label={'Big-fund' + '\n' + 'version'}
+          value={s.etfScore === null ? '—' : signed(s.etfScore) + ' ' + s.etf}
+          t={t}
+        />
       </View>
 
       {open && (
-        <View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: t.ruleSoft, paddingTop: 12 }}>
-          <Text style={{ color: t.muted, fontSize: 11, marginBottom: 8, lineHeight: 16 }}>
-            All 25 names, best first. Shading is each name’s z-score against the other 24 —
-            never across sectors.
+        <View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: t.ruleSoft, paddingTop: 10 }}>
+          <Text style={{ color: t.faint, fontSize: 11, marginBottom: 6, lineHeight: 16 }}>
+            All {s.n} companies, strongest first. The colour bar compares a company with the
+            others in its own sector — never across sectors.
           </Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            {s.constituents.map((c) => <Chip key={c.ticker} c={c} t={t} />)}
-          </View>
+          {s.constituents.map((c, i) => (
+            <NameRow key={c.ticker} c={c} t={t} last={i === s.constituents.length - 1} />
+          ))}
         </View>
       )}
 
-      <Text style={{ color: t.muted, fontSize: 11, marginTop: 10 }}>
-        {open ? 'Tap to collapse' : 'Tap for all 25 names'}
+      <Text style={{ color: t.faint, fontSize: 11, marginTop: 10 }}>
+        {open ? 'Tap to close' : 'Tap to see all 25 companies'}
       </Text>
     </Pressable>
   );
@@ -170,8 +213,8 @@ function SectorCard({ s, peak, t, open, onToggle }) {
 function Legend({ t }) {
   const keys = ['n3', 'n2', 'n1', 'z0', 'p1', 'p2', 'p3'];
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
-      <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, marginRight: 6 }}>−1.5σ</Text>
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+      <Text style={{ color: t.faint, fontSize: 10, marginRight: 6 }}>weakest</Text>
       {keys.map((k) => (
         <View
           key={k}
@@ -181,8 +224,47 @@ function Legend({ t }) {
           }}
         />
       ))}
-      <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, marginLeft: 4 }}>+1.5σ</Text>
-      <Text style={{ color: t.muted, fontSize: 10, marginLeft: 8 }}>z within sector</Text>
+      <Text style={{ color: t.faint, fontSize: 10, marginLeft: 4 }}>strongest in its sector</Text>
+    </View>
+  );
+}
+
+function Details({ t, open, onToggle }) {
+  return (
+    <View
+      style={{
+        backgroundColor: t.surface,
+        borderColor: t.rule,
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 14,
+        marginBottom: 18,
+      }}
+    >
+      <Pressable onPress={onToggle}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600', flex: 1 }}>
+            How this works
+          </Text>
+          <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 13 }}>{open ? '−' : '+'}</Text>
+        </View>
+      </Pressable>
+
+      {open &&
+        DATA.meta.details.map((d) => (
+          <View key={d.title} style={{ marginTop: 12 }}>
+            <Text style={{ color: t.ink, fontSize: 12, fontWeight: '600' }}>{d.title}</Text>
+            <Text style={{ color: t.muted, fontSize: 12, lineHeight: 18, marginTop: 3 }}>
+              {d.body}
+            </Text>
+          </View>
+        ))}
+
+      {open && (
+        <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 10, lineHeight: 15, marginTop: 12 }}>
+          {DATA.meta.stamp}
+        </Text>
+      )}
     </View>
   );
 }
@@ -191,6 +273,7 @@ export default function App() {
   const dark = useColorScheme() === 'dark';
   const t = dark ? DARK : LIGHT;
   const [open, setOpen] = useState(null);
+  const [how, setHow] = useState(false);
   const peak = Math.max(...DATA.sectors.map((s) => Math.abs(s.score)));
 
   return (
@@ -200,27 +283,21 @@ export default function App() {
         contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={{ color: t.muted, fontSize: 10, letterSpacing: 1.4, textTransform: 'uppercase' }}>
-          Equal-weight sector indices · 25 names each
+        <Text style={{ color: t.faint, fontSize: 11, letterSpacing: 1.2, textTransform: 'uppercase' }}>
+          US shares · {DATA.meta.asOf}
         </Text>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', marginTop: 6, lineHeight: 31 }}>
-          Volatility-adjusted{'\n'}9-1 momentum
+        <Text style={{ color: t.ink, fontSize: 28, fontWeight: '700', marginTop: 6, lineHeight: 33 }}>
+          Which corners of the{'\n'}market are climbing?
         </Text>
-        <Text style={{ color: t.muted, fontSize: 13, marginTop: 10, lineHeight: 19 }}>
+        <Text style={{ color: t.muted, fontSize: 14, marginTop: 12, lineHeight: 21 }}>
           {DATA.meta.blurb}
         </Text>
 
-        <View
-          style={{
-            borderTopWidth: 1, borderTopColor: t.rule, marginTop: 14, paddingTop: 10, marginBottom: 18,
-          }}
-        >
-          <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 11, lineHeight: 17 }}>
-            window {DATA.meta.windowStart} → {DATA.meta.windowEnd}{'\n'}
-            {DATA.meta.obs} obs · prices through {DATA.meta.asOf} · {DATA.meta.names} names
-          </Text>
-          <Legend t={t} />
-        </View>
+        <Legend t={t} />
+
+        <View style={{ height: 18 }} />
+
+        <Details t={t} open={how} onToggle={() => setHow(!how)} />
 
         {DATA.sectors.map((s) => (
           <SectorCard
@@ -233,11 +310,8 @@ export default function App() {
           />
         ))}
 
-        <Text style={{ color: t.muted, fontSize: 11, lineHeight: 17, marginTop: 8 }}>
-          {DATA.meta.method}
-        </Text>
-        <Text style={{ color: t.muted, fontSize: 11, lineHeight: 17, marginTop: 10 }}>
-          {DATA.meta.caveat}
+        <Text style={{ color: t.faint, fontSize: 11, lineHeight: 17, marginTop: 8 }}>
+          {DATA.meta.footer}
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -260,16 +334,19 @@ def build_data(payload: dict) -> dict:
         etf = etfs.get(s["sector"])
         sectors.append({
             "name": SHORT_NAMES.get(s["sector"], s["sector"]),
+            "gloss": SECTOR_GLOSS.get(s["sector"], ""),
             "rank": s["rank"],
             "score": round(s["score"], 4),
             "ret": round(s["ann_log_return"], 5),
             "vol": round(s["ann_vol"], 5),
-            "breadth": round(s["breadth"], 4),
+            "n": s["n_constituents"],
+            "rising": round(s["breadth"] * s["n_constituents"]),
             "etf": etf["etf"] if etf else "",
             "etfScore": round(etf["score"], 3) if etf else None,
             "constituents": [
                 {
                     "ticker": c["ticker"],
+                    "name": trim_company(c.get("name") or c["ticker"]),
                     "score": None if c["score"] is None else round(c["score"], 3),
                     "z": None if c["sector_z"] is None else round(c["sector_z"], 3),
                 }
@@ -277,32 +354,112 @@ def build_data(payload: dict) -> dict:
             ],
         })
 
+    details = [
+        {
+            "title": "What the number means",
+            "body": (
+                "It is a climb-per-bump score: how much a sector rose over the stretch, "
+                "divided by how roughly it got there. A sector that ground steadily upward "
+                "beats one that ended in the same place after wild swings. Above about 1.0 "
+                "is a solid climb; near zero is going nowhere; below zero is falling."
+            ),
+        },
+        {
+            "title": "Which stretch of time",
+            "body": (
+                f"The nine months from {first['window_start']} to {first['window_end']}. "
+                "The most recent few weeks are deliberately left out — fresh moves tend to "
+                "snap back, and skipping them is the standard guard against being fooled by "
+                "a short bounce."
+            ),
+        },
+        {
+            "title": "What a sector is here",
+            "body": (
+                f"Not a real fund. Each one is a made-up basket of that sector's "
+                f"{config.SECTOR_INDEX_SIZE} biggest, most-traded US companies, held in equal "
+                "amounts. Equal amounts means one giant company cannot speak for the whole "
+                "sector. The 'big-fund version' column is the real SPDR fund for that sector, "
+                "scored the same way, as a sanity check."
+            ),
+        },
+        {
+            "title": "Names rising",
+            "body": (
+                f"How many of the {config.SECTOR_INDEX_SIZE} companies climbed on their own. "
+                "A sector can look strong "
+                "while only a handful of names did the work — this column tells you which is "
+                "which."
+            ),
+        },
+        {
+            "title": "Worth knowing",
+            "body": (
+                "The baskets use today's most-traded companies applied to past prices, so the "
+                "history flatters them a little — the names that stumbled badly are no longer "
+                "in the list. This ranks sectors as they stand today. It is not a trading "
+                "record, and it is not advice."
+                + (f" Agreement with the real sector funds: {rho:.0%}." if rho else "")
+            ),
+        },
+    ]
+
     return {
         "meta": {
-            "asOf": payload["as_of"],
-            "windowStart": first["window_start"],
-            "windowEnd": first["window_end"],
-            "obs": obs,
-            "names": sum(s["n_constituents"] for s in payload["sectors"]),
+            "asOf": pretty_date(payload["as_of"]),
             "blurb": (
-                f"{len(sectors)} synthetic sector ETFs, each an equal-weight basket of "
-                f"that sector's {config.SECTOR_INDEX_SIZE} most liquid US-listed stocks, "
-                f"rebalanced daily. Tap any sector for its names."
+                f"Eleven corners of the US stock market, ranked by how steadily they have "
+                f"climbed over the past nine months. Tap any one to see the "
+                f"{config.SECTOR_INDEX_SIZE} companies inside it."
             ),
-            "method": (
-                f"Score = annualised 9-1 log return over annualised vol, both measured on "
-                f"the same {obs}-day window (t−{long_days}d to t−{skip_days}d, skipping the "
-                f"last month). Breadth is the share of the 25 names positive on their own."
+            "footer": (
+                "Prices from FMP, adjusted for splits and dividends. Information only — "
+                "not investment advice."
             ),
-            "caveat": (
-                "Membership is today's most liquid names applied to past prices, so the "
-                "history carries that survivorship. Ranks sectors as they stand; not a "
-                "tradable backtest."
-                + (f" Rank correlation with the SPDR sector ETFs: {rho:.2f}." if rho else "")
+            "stamp": (
+                f"window {first['window_start']} → {first['window_end']} · {obs} trading days "
+                f"(t−{long_days}d to t−{skip_days}d) · prices through {payload['as_of']} · "
+                f"{sum(s['n_constituents'] for s in payload['sectors'])} companies"
             ),
+            "details": details,
         },
         "sectors": sectors,
     }
+
+
+COMPANY_SUFFIXES = (
+    " Corporation", " Incorporated", " Company", ", Inc.", " Inc.", " Corp.",
+    " Co., Ltd.", " Ltd.", " plc", " PLC", " N.V.", " S.A.", " Holdings, Inc",
+    " Group, Inc", " Company, LLC", " LLC", " L.P.", " Trust, Inc",
+)
+
+
+def trim_company(name: str) -> str:
+    """Drop the legal boilerplate so the name fits a phone row."""
+    out = name.strip()
+    changed = True
+    while changed:
+        changed = False
+        for suffix in COMPANY_SUFFIXES:
+            if out.lower().endswith(suffix.lower()):
+                out = out[: -len(suffix)].rstrip(" ,")
+                changed = True
+    return out or name
+
+
+MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+
+
+def pretty_date(iso: str) -> str:
+    """2026-08-10 -> 10 August 2026, without pulling in a date library."""
+    try:
+        year, month, day = (int(p) for p in iso.split("-"))
+        return f"{day} {MONTHS[month - 1]} {year}"
+    except (ValueError, IndexError):
+        return iso
 
 
 def render_app(payload: dict) -> str:
@@ -350,8 +507,11 @@ def main() -> None:
         try:
             result = publish(
                 source,
-                name="Sector momentum 9-1",
-                description=f"Vol-adjusted 9-1 sector ranking, prices through {payload['as_of']}",
+                name="Which sectors are climbing?",
+                description=(
+                    "US stock sectors ranked on a steady-climb score, "
+                    f"prices through {payload['as_of']}"
+                ),
             )
         except urllib.error.HTTPError as e:
             raise SystemExit(f"snack save failed: {e.code} {e.read().decode()[:300]}")

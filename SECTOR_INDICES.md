@@ -35,9 +35,23 @@ python3 sector_snack.py --publish  # ...and upload, printing the links
 
 The 11 x 25 heatmap does not survive a phone screen, so the phone build
 inverts it: a tappable list of sectors, each opening into its own 25 names as
-chips shaded on the same within-sector z. Data is baked into the bundle, so
-the app needs no network once loaded, and it reads the phone's colour scheme.
-Pure React Native primitives — no dependencies for Expo Go to resolve.
+rows — ticker, company name, score — with a colour bar on the same
+within-sector z. Data is baked into the bundle, so the app needs no network
+once loaded, and it reads the phone's colour scheme. Pure React Native
+primitives — no dependencies for Expo Go to resolve.
+
+The screen is written for a reader who does not know the vocabulary. Sectors
+carry a plain gloss ("chips, software, hardware") and a verdict word
+("Climbing steadily"); the columns read *Gain over the year*, *Typical swing*,
+*Names rising*, *Big-fund version*; and the maths — what the score is, which
+window, why the last month is skipped, the survivorship caveat — sits in a
+collapsed "How this works" panel rather than on the first screen. The exact
+window, observation count and as-of date stay in that panel as a mono stamp.
+
+`tests/test_sector_snack.py` covers the payload → `App.js` step: every sector
+and name survives, unscorable names stay as nulls, the basket size is
+data-driven rather than a hardcoded 25, and the bundle imports nothing beyond
+`react` and `react-native`.
 
 ## Universe
 

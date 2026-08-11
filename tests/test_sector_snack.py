@@ -1,0 +1,144 @@
+"""The phone build: payload -> App.js. No network, no Expo."""
+import json
+import re
+
+import pytest
+
+import config
+import sector_snack
+
+
+def _payload(n=3):
+    """Minimal ranking payload shaped like sector_index writes it."""
+    def sector(name, rank, score, etf):
+        return {
+            "sector": name,
+            "rank": rank,
+            "score": score,
+            "ann_log_return": score * 0.2,
+            "ann_vol": 0.2,
+            "breadth": 0.6,
+            "n_constituents": n,
+            "window_start": "2025-11-05",
+            "window_end": "2026-07-10",
+            "window_obs": 168,
+            "median_dollar_volume": 1e9,
+            "log_return_9_1": score * 0.13,
+            "constituents": [
+                {
+                    "ticker": f"{name[:2].upper()}{i}",
+                    "name": f"{name} Holdings, Inc",
+                    "industry": "x",
+                    "market_cap": 1e10,
+                    "median_dollar_volume": 1e8,
+                    "score": None if i == n - 1 else 1.0 - i,
+                    "sector_z": None if i == n - 1 else 1.0 - i,
+                    "sector_rank": None if i == n - 1 else i + 1,
+                    "ann_log_return": 0.1,
+                    "ann_vol": 0.2,
+                }
+                for i in range(n)
+            ],
+        }
+
+    return {
+        "as_of": "2026-08-10",
+        "generated": "2026-08-11T04:00:00",
+        "method": "...",
+        "sectors": [sector("Technology", 1, 2.3, "XLK"), sector("Utilities", 2, -0.4, "XLU")],
+        "benchmark": {
+            "etfs": {
+                "Technology": {"etf": "XLK", "score": 1.9},
+                "Utilities": {"etf": "XLU", "score": -0.2},
+            },
+            "rank_correlation": 0.74,
+        },
+    }
+
+
+# ---------- helpers ----------
+
+@pytest.mark.parametrize("raw, want", [
+    ("Sandisk Corporation", "Sandisk"),
+    ("Cisco Systems, Inc.", "Cisco Systems"),
+    ("Linde plc", "Linde"),
+    ("Prologis Trust, Inc", "Prologis"),
+    ("Alphabet Inc.", "Alphabet"),
+    ("3M", "3M"),                       # nothing to strip
+])
+def test_trim_company_drops_legal_boilerplate(raw, want):
+    assert sector_snack.trim_company(raw) == want
+
+
+def test_trim_company_never_empties_a_name():
+    assert sector_snack.trim_company("Inc.") == "Inc."
+
+
+def test_pretty_date():
+    assert sector_snack.pretty_date("2026-08-10") == "10 August 2026"
+    assert sector_snack.pretty_date("not-a-date") == "not-a-date"
+
+
+# ---------- payload -> render data ----------
+
+def test_build_data_keeps_every_sector_and_name():
+    data = sector_snack.build_data(_payload())
+
+    assert [s["rank"] for s in data["sectors"]] == [1, 2]
+    assert all(len(s["constituents"]) == s["n"] for s in data["sectors"])
+    assert all(s["gloss"] for s in data["sectors"])          # every sector reads in plain words
+
+
+def test_rising_count_is_whole_names_not_a_fraction():
+    data = sector_snack.build_data(_payload(n=25))
+    top = data["sectors"][0]
+
+    assert top["rising"] == 15                                # 0.6 of 25
+    assert top["n"] == 25
+    assert isinstance(top["rising"], int)
+
+
+def test_unscorable_names_survive_as_nulls():
+    data = sector_snack.build_data(_payload())
+    last = data["sectors"][0]["constituents"][-1]
+
+    assert last["score"] is None and last["z"] is None
+    assert last["ticker"]                                     # still listed, just blank-scored
+
+
+def test_meta_reads_in_plain_words():
+    meta = sector_snack.build_data(_payload())["meta"]
+
+    assert meta["asOf"] == "10 August 2026"
+    assert len(meta["details"]) >= 4
+    assert all(d["title"] and d["body"] for d in meta["details"])
+    assert "74%" in meta["details"][-1]["body"]               # benchmark agreement, as a percent
+    assert str(config.SECTOR_INDEX_SIZE) in json.dumps(meta)  # basket size is data-driven
+
+
+def test_meta_survives_a_payload_with_no_benchmark():
+    payload = _payload()
+    del payload["benchmark"]
+    meta = sector_snack.build_data(payload)["meta"]
+
+    assert meta["details"]
+    assert sector_snack.build_data(payload)["sectors"][0]["etfScore"] is None
+
+
+# ---------- render ----------
+
+def test_render_bakes_the_data_into_the_bundle():
+    src = sector_snack.render_app(_payload())
+
+    assert "__DATA__" not in src
+    assert src.startswith("import React")
+    baked = json.loads(re.search(r"^const DATA = (.*);$", src, re.M).group(1))
+    assert len(baked["sectors"]) == 2
+
+
+def test_render_has_no_dependencies_to_resolve():
+    """Expo Go must load it with nothing to install."""
+    src = sector_snack.render_app(_payload())
+    imports = re.findall(r"from '([^']+)'", src)
+
+    assert set(imports) <= {"react", "react-native"}
