@@ -29,7 +29,7 @@ than either 25-name tier did (rank correlation 0.83).
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/Nn44oLRTEfVMjdcpEU6pQ** — open it in Expo
+**Live link: https://snack.expo.dev/Ui1AbR9nlv4pZZbmvBGIK** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -80,7 +80,15 @@ was right: **the accent colours appear only at full strength** on type and on
 stay deleted and a test enforces their absence.
 
 Navigation is a `stack` array of screen descriptors — push, pop, and Android's
-hardware back button pops it rather than leaving the app. The scroller is keyed
+hardware back button pops it rather than leaving the app. It is deliberately
+depth-capped: a company screen always sits exactly three deep, so following one
+related name to the next *replaces* the company screen instead of pushing
+another. The first build stacked them and the user hit it immediately — "it
+creates a trail I have to tap back through" — and four hops meant four taps
+back. Now it is two from anywhere. A company opened from the watchlist keeps
+the watchlist as its parent, since that is the list being worked through. Back
+names its destination ("‹ Technology", "‹ Watchlist") rather than saying
+"Back", so the way out is legible without remembering the way in. The scroller is keyed
 by screen so a push lands at the top of the new screen instead of halfway down
 the last one, and fresh numbers arriving from the feed reset the stack, because
 the open screens described the old ones.

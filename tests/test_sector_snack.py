@@ -341,6 +341,34 @@ def test_navigation_is_a_stack_the_back_button_pops():
     assert "onLongPress" not in src                        # one gesture: press a row
 
 
+def test_following_related_names_never_builds_a_trail():
+    """Tapping through related companies must not stack screens: every company
+    screen sits exactly three deep, so the way out is always two taps."""
+    src = sector_snack.render_app(_payload())
+
+    assert "return [{ k: 'sectors' }, parent, { k: 'company', ticker }];" in src
+    # no route into a company screen bypasses that rule
+    assert "push({ k: 'company'" not in src
+    assert "onOpenCompany={(c) => openCompany(c.ticker)}" in src
+
+
+def test_a_company_opened_from_the_watchlist_goes_back_to_it():
+    """Entry context is preserved — the parent is the list you were working
+    through, not the company's sector."""
+    src = sector_snack.render_app(_payload())
+
+    assert "const fromWatchlist = s.some((x) => x.k === 'watchlist');" in src
+    assert "? { k: 'watchlist' }" in src
+
+
+def test_the_back_button_names_where_it_goes():
+    src = sector_snack.render_app(_payload())
+
+    assert "{'‹ ' + back}" in src
+    assert "under.k === 'sector' ? under.name" in src
+    assert "'‹ Back'" not in src
+
+
 def test_a_push_lands_at_the_top_of_the_new_screen():
     """Keying the scroller by screen remounts it, so a pushed screen never
     opens halfway down the previous one's scroll position."""

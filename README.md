@@ -3,7 +3,7 @@
 Which corners of the US stock market are climbing, and which companies inside
 them are doing the climbing.
 
-**The app: https://snack.expo.dev/Nn44oLRTEfVMjdcpEU6pQ**
+**The app: https://snack.expo.dev/Ui1AbR9nlv4pZZbmvBGIK**
 
 Open that on a phone with [Expo Go](https://expo.dev/go) installed, or scan the
 QR code on the page. There is nothing to install and no account to make.

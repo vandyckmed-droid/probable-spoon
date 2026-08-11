@@ -190,8 +190,12 @@ function GroupLabel({ t, children, right }) {
   );
 }
 
-/** The bar every screen but the first carries: back, title, optional action. */
-function NavBar({ t, title, onBack, action }) {
+/**
+ * The bar every screen but the first carries. Back names where it goes —
+ * "‹ Technology", not "‹ Back" — so the way out is legible without having to
+ * remember the route in.
+ */
+function NavBar({ t, title, back, onBack, action }) {
   return (
     <View
       style={{
@@ -209,7 +213,9 @@ function NavBar({ t, title, onBack, action }) {
         hitSlop={12}
         style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 7, opacity: pressed ? 0.5 : 1 })}
       >
-        <Text style={{ color: t.accent, fontSize: 16, fontWeight: '600' }}>‹ Back</Text>
+        <Text numberOfLines={1} style={{ color: t.accent, fontSize: 16, fontWeight: '600' }}>
+          {'‹ ' + back}
+        </Text>
       </Pressable>
       <Text numberOfLines={1} style={{ color: t.ink, fontSize: 15, fontWeight: '600', flex: 1, textAlign: 'center' }}>
         {title}
@@ -664,13 +670,33 @@ export default function App() {
     return m;
   }, [tiers]);
 
+  /**
+   * Every company screen sits exactly three deep, whichever route reached it:
+   * sectors → its own sector → the company. Following one related name to the
+   * next therefore *replaces* the company screen instead of stacking another,
+   * so the way out never grows into a trail to tap back through. A company
+   * opened from the watchlist keeps the watchlist as its parent, because that
+   * is the list the reader was working through.
+   */
   const openCompany = useCallback((ticker) => {
     const c = lookup[ticker];
-    if (c) push({ k: 'company', ticker });
-  }, [lookup, push]);
+    if (!c) return;
+    tapped();
+    setStack((s) => {
+      const fromWatchlist = s.some((x) => x.k === 'watchlist');
+      const parent = fromWatchlist
+        ? { k: 'watchlist' }
+        : { k: 'sector', name: c.sector, tier: c.tier };
+      return [{ k: 'sectors' }, parent, { k: 'company', ticker }];
+    });
+  }, [lookup]);
 
   const peak = Math.max(...active.sectors.map((s) => Math.abs(s.score)), 0.01);
   const namePeak = 3;   // scores past ±3 are rare; a fixed peak keeps bars comparable across sectors
+
+  const BACK_LABELS = { sectors: 'Sectors', watchlist: 'Watchlist', how: 'How this works' };
+  const under = stack[stack.length - 2];
+  const back = under ? (under.k === 'sector' ? under.name : BACK_LABELS[under.k] || 'Back') : 'Back';
 
   let title = '';
   let body = null;
@@ -688,7 +714,7 @@ export default function App() {
     const s = (tiers.find((x) => x.key === here.tier) || active).sectors.find((x) => x.name === here.name);
     title = here.name;
     body = s ? (
-      <SectorScreen s={s} t={t} wl={wl} peak={namePeak} onOpenCompany={(c) => push({ k: 'company', ticker: c.ticker })} />
+      <SectorScreen s={s} t={t} wl={wl} peak={namePeak} onOpenCompany={(c) => openCompany(c.ticker)} />
     ) : null;
   } else if (here.k === 'company') {
     const c = lookup[here.ticker];
@@ -717,6 +743,7 @@ export default function App() {
         <NavBar
           t={t}
           title={title}
+          back={back}
           onBack={pop}
           action={
             here.k === 'company' ? (
