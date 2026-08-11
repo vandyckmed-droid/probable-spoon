@@ -29,7 +29,7 @@ than either 25-name tier did (rank correlation 0.83).
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/Ui1AbR9nlv4pZZbmvBGIK** — open it in Expo
+**Live link: https://snack.expo.dev/lo8fxonAKzb7T0SVCN_La** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -92,6 +92,29 @@ names its destination ("‹ Technology", "‹ Watchlist") rather than saying
 by screen so a push lands at the top of the new screen instead of halfway down
 the last one, and fresh numbers arriving from the feed reset the stack, because
 the open screens described the old ones.
+
+### The explainer says how it works, exactly
+
+"How this works" is held to a stricter standard than the rest of the copy:
+state the arithmetic, name the real numbers, and never hedge. It had drifted
+badly — two of its six sections still described the heatmap's shading toggle
+and a "big-fund version column", neither of which had existed for two rewrites,
+and it hedged throughout ("about 1.0", "a few weeks", "flatters them a little",
+"climb-per-bump score").
+
+It now says the score is one number divided by another, names both, and works
+a real example straight out of the payload being rendered: "Technology rose
+78.3% a year and moved 36.6%. 78.3 ÷ 36.6 = 2.14, the score you see on its
+row." A reader can check the sentence against the row. The rank correlation is
+given as 0.83 with its scale stated, not as "83% agreement" — a rank
+correlation is not a percentage of agreement, and calling it one was the most
+misleading line on the screen. The survivorship caveat says outright that these
+are not returns anyone could have earned.
+
+Tests enforce it: the worked example must match the payload, the honest-caveat
+sentences must be present, and a list of banned hedges and dead-UI words must
+not appear. Paragraphs are laid out as separate elements rather than newlines
+inside one string, so the breaks that make the screen readable cannot collapse.
 
 ### Why the numbers are fetched, not baked
 

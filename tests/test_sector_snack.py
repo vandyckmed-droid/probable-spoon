@@ -121,8 +121,55 @@ def test_meta_reads_in_plain_words():
     assert meta["asOf"] == "10 August 2026"
     assert len(meta["details"]) >= 4
     assert all(d["title"] and d["body"] for d in meta["details"])
-    assert "74%" in meta["details"][-1]["body"]               # benchmark agreement, as a percent
+    # A rank correlation is not a percentage of agreement; say what it is.
+    assert "0.74" in meta["details"][-1]["body"]
+    assert "1.00 would be identical" in meta["details"][-1]["body"]
+    assert "74%" not in json.dumps(meta)
     assert str(config.SECTOR_INDEX_SIZE) in json.dumps(meta)  # basket size is data-driven
+
+
+def test_the_explainer_states_the_arithmetic_and_works_an_example():
+    """A reader must be able to check the sentence against the number on the
+    row, so the example is computed from this very payload."""
+    body = sector_snack.build_data(_payload())["meta"]["details"][0]["body"]
+    top = sector_snack.build_data(_payload())["sectors"][0]
+
+    assert "÷" in body and "one divided by the other" in body
+    assert f"{round(top['ret'] * 100, 1)}" in body
+    assert f"{round(top['vol'] * 100, 1)}" in body
+    assert f"= {top['score']:.2f}" in body
+
+
+def test_the_explainer_never_hedges_or_describes_a_control_that_is_gone():
+    """Vague hedges and stale UI references are bugs on this screen. Two
+    sections once described a heatmap's shading toggle and a 'column' that no
+    longer exist, and the score was called a 'climb-per-bump'."""
+    meta = sector_snack.build_data(_payload())["meta"]
+    prose = " ".join(d["title"] + " " + d["body"] for d in meta["details"]).lower()
+
+    for gone in ("two ways to shade", "colours each company", "column",
+                 "climb-per-bump", "whole market"):
+        assert gone not in prose, gone
+    for hedge in ("about 1.0", "a few weeks are", "flatters them a little",
+                  "roughly right —", "a little "):
+        assert hedge not in prose, hedge
+
+
+def test_each_paragraph_is_its_own_element():
+    """The breaks carry the structure of this screen, so they are laid out
+    rather than embedded as newlines in one blob of text."""
+    src = sector_snack.render_app(_payload())
+
+    assert "d.body.split('\\n\\n').map((para, i) =>" in src
+    assert "marginTop: i ? 10 : 5" in src
+
+
+def test_the_explainer_is_honest_about_what_it_cannot_tell_you():
+    body = sector_snack.build_data(_payload())["meta"]["details"][-1]["body"].lower()
+
+    assert "not returns anyone could have earned" in body
+    assert "not a trading record" in body and "not advice" in body
+    assert "dropped off the list" in body            # survivorship, stated outright
 
 
 def test_meta_survives_a_payload_with_no_benchmark():

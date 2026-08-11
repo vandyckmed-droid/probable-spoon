@@ -544,9 +544,19 @@ function HowScreen({ meta, t }) {
   return (
     <View style={{ paddingHorizontal: 18, paddingBottom: 44 }}>
       {meta.details.map((d) => (
-        <View key={d.title} style={{ marginTop: 20 }}>
+        <View key={d.title} style={{ marginTop: 22 }}>
           <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{d.title}</Text>
-          <Text style={{ color: t.muted, fontSize: 13.5, lineHeight: 20, marginTop: 5 }}>{d.body}</Text>
+          {/* Each paragraph is its own element rather than one blob with
+              newlines in it: the breaks are what make this screen readable,
+              and spacing between views cannot silently collapse. */}
+          {d.body.split('\n\n').map((para, i) => (
+            <Text
+              key={i}
+              style={{ color: t.muted, fontSize: 13.5, lineHeight: 20, marginTop: i ? 10 : 5 }}
+            >
+              {para}
+            </Text>
+          ))}
         </View>
       ))}
       <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 10.5, lineHeight: 16, marginTop: 24 }}>
@@ -837,62 +847,108 @@ def build_data(payload: dict) -> dict:
             else round((c["score"] - mean) / sd, 3)
         )
 
+    # The explainer states the arithmetic outright and works one real example
+    # from this very payload, so a reader can check the number on screen
+    # against the sentence. Vague hedges ("about 1.0", "a few weeks", "flatters
+    # them a little") and any mention of a control the app no longer has are
+    # bugs here, not style.
+    lead = rendered[0][0]
+    lead_ret = round(lead["ret"] * 100, 1)
+    lead_vol = round(lead["vol"] * 100, 1)
+    sizes = sorted({s["n"] for tier in rendered for s in tier})
+    short = [s for tier in rendered for s in tier if s["n"] < config.SECTOR_INDEX_SIZE]
+
     details = [
         {
-            "title": "What the number means",
+            "title": "What the score is",
             "body": (
-                "It is a climb-per-bump score: how much a sector rose over the stretch, "
-                "divided by how roughly it got there. A sector that ground steadily upward "
-                "beats one that ended in the same place after wild swings. Above about 1.0 "
-                "is a solid climb; near zero is going nowhere; below zero is falling."
+                "Two measurements, one divided by the other.\n\n"
+                "Top: how fast the basket rose over the nine months, written as a "
+                "yearly rate.\n"
+                "Bottom: how much it moved up and down day to day over those same "
+                "nine months, also written as a yearly rate. That is the number each "
+                "sector page calls its typical swing.\n\n"
+                f"{lead['name']} rose {lead_ret}% a year and moved {lead_vol}%. "
+                f"{lead_ret} ÷ {lead_vol} = {lead['score']:.2f}, the score you see on "
+                "its row.\n\n"
+                "So the score is how much a sector climbed for each unit of shaking "
+                "along the way. 1.00 means it rose exactly as fast as it shook. 0 "
+                "means it went nowhere. Below 0 means it fell."
             ),
         },
         {
-            "title": "Which stretch of time",
+            "title": "Which nine months",
             "body": (
-                f"The nine months from {first['window_start']} to {first['window_end']}. "
-                "The most recent few weeks are deliberately left out — fresh moves tend to "
-                "snap back, and skipping them is the standard guard against being fooled by "
-                "a short bounce."
+                f"{pretty_date(first['window_start'])} to "
+                f"{pretty_date(first['window_end'])} — {obs} trading days.\n\n"
+                f"That window ends {skip_days} trading days (one month) before the "
+                f"latest prices, and those {skip_days} days are left out of every "
+                "number on the screen. A share that jumped in the last few weeks "
+                "often gives it back, so counting that jump would make a sector look "
+                "stronger than it is."
             ),
         },
         {
             "title": "What a sector is here",
             "body": (
-                f"Not a real fund. Each one is a made-up basket of that sector's "
-                f"{config.SECTOR_INDEX_SIZE} biggest, most-traded US companies, held in equal "
-                "amounts. Equal amounts means one giant company cannot speak for the whole "
-                "sector. The 'big-fund version' column is the real SPDR fund for that sector, "
-                "scored the same way, as a sanity check."
+                "Not a real fund — a list built from scratch.\n\n"
+                "Every US-listed company worth more than "
+                f"${config.SCREEN_MIN_MARKET_CAP / 1e9:.0f} billion is sorted by how "
+                "much of it is bought and sold on an average day. The busiest "
+                f"{config.SECTOR_INDEX_SIZE} in each sector make the list.\n\n"
+                f"All {config.SECTOR_INDEX_SIZE} count the same amount — "
+                f"{100 / config.SECTOR_INDEX_SIZE:.0f}% each — so one giant company "
+                "cannot speak for the whole sector."
+                + (
+                    "\n\n"
+                    + "; ".join(
+                        f"{x['name']} has {x['n']}" for x in short
+                    )
+                    + f" instead of {config.SECTOR_INDEX_SIZE}, because that is how "
+                    "many companies in it clear the size and trading bar."
+                    if short
+                    else ""
+                )
             ),
         },
         {
-            "title": "Names rising",
+            "title": "The “x of 50 up” line",
             "body": (
-                f"How many of the {config.SECTOR_INDEX_SIZE} companies climbed on their own. "
-                "A sector can look strong "
-                "while only a handful of names did the work — this column tells you which is "
-                "which."
+                "Every company is scored on its own with the same arithmetic. That "
+                "line counts how many finished above zero.\n\n"
+                "It matters because a sector can score well on the strength of a few "
+                "names while most of it went nowhere. A high count means the whole "
+                "sector moved; a low count means a handful carried it."
             ),
         },
         {
-            "title": "Two ways to shade",
+            "title": "The real fund on each sector page",
             "body": (
-                "'By sector' colours each company against the others in its own "
-                "sector, so every sector shows its own leaders and laggards. "
-                "'Whole market' colours everyone against the full page on one "
-                "scale — a strong sector goes green nearly wall to wall, a weak "
-                "one sinks together."
+                "Each sector page names the matching SPDR fund — XLK for technology, "
+                "XLE for energy — and scores it over the identical nine months.\n\n"
+                "It will not match. That fund holds companies in proportion to their "
+                f"size and holds more than {config.SECTOR_INDEX_SIZE} of them; this "
+                "basket holds the busiest "
+                f"{config.SECTOR_INDEX_SIZE} in equal amounts. It is there as a check "
+                "that the sector is being read roughly right, not as the same thing."
             ),
         },
         {
-            "title": "Worth knowing",
+            "title": "What this does not tell you",
             "body": (
-                "The baskets use today's most-traded companies applied to past prices, so the "
-                "history flatters them a little — the names that stumbled badly are no longer "
-                "in the list. This ranks sectors as they stand today. It is not a trading "
-                "record, and it is not advice."
-                + (f" Agreement with the real sector funds: {rho:.0%}." if rho else "")
+                f"The {config.SECTOR_INDEX_SIZE} companies in each list are chosen "
+                "using today's trading, and then their prices are read backwards over "
+                "the past nine months. Companies that collapsed and dropped off the "
+                "list are not in it. That makes the past look better than it was, and "
+                "it means these are not returns anyone could have earned.\n\n"
+                "This ranks sectors as they stand today. It is not a trading record "
+                "and it is not advice."
+                + (
+                    "\n\nPut in the same order as the eleven real SPDR sector funds "
+                    f"over these nine months, the two orderings line up at {rho:.2f} — "
+                    "1.00 would be identical, 0 would be unrelated."
+                    if rho else ""
+                )
             ),
         },
     ]
