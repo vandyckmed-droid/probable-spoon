@@ -402,9 +402,9 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
         clean, _rejected = clean_candidates(candidates, closes, volumes)
         for i, tier in enumerate(tiers):
             members = tier_slice(clean, i)
-            # A short tier is skipped rather than padded: an 18-name basket is
-            # not comparable with a 25-name one on breadth or on index vol.
-            if len(members) < config.SECTOR_INDEX_SIZE:
+            # A slightly short basket beats dropping a whole sector, but a
+            # badly short one is not comparable on breadth or index vol.
+            if len(members) < config.SECTOR_INDEX_MIN_SIZE:
                 print(
                     f"  {sector} / {tier['label']}: only {len(members)} clean name(s) "
                     f"of {len(clean)} — skipped"

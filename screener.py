@@ -110,10 +110,10 @@ def candidates_by_sector(rows: list[dict] | None = None) -> dict[str, list[dict]
 
     out: dict[str, list[dict]] = {}
     for sector, recs in buckets.items():
-        if len(recs) < config.SECTOR_INDEX_SIZE:
+        if len(recs) < config.SECTOR_INDEX_MIN_SIZE:
             print(
                 f"  skipping {sector}: only {len(recs)} liquid name(s), "
-                f"need {config.SECTOR_INDEX_SIZE}"
+                f"need {config.SECTOR_INDEX_MIN_SIZE}"
             )
             continue
         recs.sort(key=lambda r: -r["screen_dollar_volume"])

@@ -9,10 +9,11 @@ would improve one at the other's expense, the phone screen wins. Design for a
 phone first: dense, everything visible, minimal scroll, no information parked
 behind a tap that could have been shown outright.
 
-**Design authority is yours.** The user has delegated UI/UX wholesale: keep it
-professional, effortless and quiet. One design system across every screen and
-both colour schemes; a neutral palette with a single muted diverging ramp for
-the data and one interactive accent; no glow, no shadows, no per-sector hues,
+**Design authority is yours, with one standing user choice.** The user has
+delegated UI/UX but has chosen the palette: brokerage-dark, acid green
+(`#9fe519`) for leading, signal orange for lagging — keep that. Everything
+around it stays professional, effortless and quiet: one design system across
+every screen and both colour schemes, no glow, no shadows, no per-sector hues,
 no novelty type. Readability beats spectacle — check light mode explicitly,
 it is where decoration goes to die. Take function requests from the user;
 translate them into this system rather than styling to order.

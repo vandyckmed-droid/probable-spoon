@@ -75,20 +75,21 @@ const BAKED = __DATA__;
 const FEED = __FEED__;
 
 /**
- * One design system, both lists, both colour schemes. A muted diverging scale
- * carries the one number that matters — teal for names leading their sector,
- * rust for names lagging it — and everything else stays neutral so the data
- * is the only thing with a voice.
+ * One design system, both colour schemes, brokerage-dark first: near-black
+ * ground, acid green for names leading their sector, signal orange for names
+ * lagging it. Everything else stays neutral so the data is the only thing
+ * with a voice. Light mode keeps the same vocabulary with the green pulled
+ * down to hold contrast on white.
  */
 const LIGHT = {
-  ground: '#f7f8fa', surface: '#ffffff', ink: '#1b2430', muted: '#5b6675',
-  faint: '#8b95a2', rule: '#e2e6eb', ruleSoft: '#eef1f4',
-  pos: '#1f7a68', neg: '#bf5b49', accent: '#3d6fd6',
+  ground: '#fafbf8', surface: '#ffffff', ink: '#151a12', muted: '#5a6357',
+  faint: '#8a9385', rule: '#e2e6dc', ruleSoft: '#eef1e8',
+  pos: '#4f9c00', neg: '#d9542e', accent: '#3e7d00',
 };
 const DARK = {
-  ground: '#0f1318', surface: '#161b22', ink: '#e6ebf1', muted: '#98a2af',
-  faint: '#6b7480', rule: '#273039', ruleSoft: '#1d242c',
-  pos: '#46b39a', neg: '#d8836f', accent: '#6f9be8',
+  ground: '#0a0c0a', surface: '#131613', ink: '#eef2ea', muted: '#9aa596',
+  faint: '#6c7568', rule: '#242923', ruleSoft: '#1a1e19',
+  pos: '#9fe519', neg: '#ff6a45', accent: '#ccff5e',
 };
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
@@ -113,7 +114,7 @@ function cellFill(z, t, dark) {
   const side = z < 0 ? t.neg : t.pos;
   const m = Math.min(Math.abs(z) / 1.5, 1);
   const base = dark ? t.surface : '#ffffff';
-  return mix(base, side, dark ? 0.1 + 0.52 * m : 0.07 + 0.38 * m);
+  return mix(base, side, dark ? 0.09 + 0.48 * m : 0.07 + 0.36 * m);
 }
 
 const pct = (x) => (x === null || x === undefined ? '—' : Math.round(x * 100) + '%');
@@ -699,9 +700,9 @@ def build_data(payload: dict) -> dict:
             ],
             "blurb": (
                 f"{len(rendered[0])} corners of the US market, best first, by how steadily "
-                f"they climbed over nine months. Teal squares are leading their sector, "
-                f"rust squares are lagging it. Tap any company to light up everything that "
-                f"moves with it — including on the other list."
+                f"they climbed over nine months. Green squares are leading their sector, "
+                f"orange squares are lagging it — the deeper, the stronger. Tap any "
+                f"company to light up everything that moves with it."
             ),
             "footer": (
                 "Prices from FMP, adjusted for splits and dividends. Information only — "

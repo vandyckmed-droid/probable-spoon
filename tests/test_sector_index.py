@@ -315,7 +315,7 @@ def _tier_panel(tickers, n=260):
 
 
 def test_tiers_are_consecutive_slices_of_one_liquidity_ranking():
-    cands = _tier_candidates(60)
+    cands = _tier_candidates(2 * config.SECTOR_INDEX_SIZE + 10)
     closes, volumes = _tier_panel([c["ticker"] for c in cands])
 
     clean, _ = sector_index.clean_candidates(cands, closes, volumes)
@@ -331,7 +331,7 @@ def test_tiers_are_consecutive_slices_of_one_liquidity_ranking():
 
 
 def test_a_short_tier_comes_back_short_so_the_caller_can_skip_it():
-    cands = _tier_candidates(40)
+    cands = _tier_candidates(config.SECTOR_INDEX_SIZE + 15)
     closes, volumes = _tier_panel([c["ticker"] for c in cands])
 
     clean, _ = sector_index.clean_candidates(cands, closes, volumes)
@@ -343,11 +343,11 @@ def test_a_short_tier_comes_back_short_so_the_caller_can_skip_it():
 
 def test_select_constituents_still_returns_the_first_tier():
     """The old entry point keeps its old meaning."""
-    cands = _tier_candidates(60)
+    cands = _tier_candidates(config.SECTOR_INDEX_SIZE + 10)
     closes, volumes = _tier_panel([c["ticker"] for c in cands])
 
     keep, rejected = sector_index.select_constituents(cands, closes, volumes)
     clean, _ = sector_index.clean_candidates(cands, closes, volumes)
 
     assert [c["ticker"] for c in keep] == [c["ticker"] for c in sector_index.tier_slice(clean, 0)]
-    assert len(rejected) == 60 - config.SECTOR_INDEX_SIZE
+    assert len(rejected) == 10

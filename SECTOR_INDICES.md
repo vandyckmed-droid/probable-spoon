@@ -4,47 +4,24 @@ Builds synthetic equal-weight indices per GICS-style sector out of that
 sector's most liquid US-listed stocks, then ranks the sectors on
 volatility-adjusted 9-1 log return.
 
-## Tiers
+## Baskets
 
-Each sector's clean names are sorted by liquidity once and cut into consecutive
-blocks of `SECTOR_INDEX_SIZE`, one tier per block (`config.SECTOR_TIERS`). Tier
-2 is therefore *the next 25 down*, not a different kind of company — the split
-is a single cut through one ranking, so "one rung down the size ladder" is
-literally what it means.
+Each sector's clean names are sorted by liquidity once and the top
+`SECTOR_INDEX_SIZE` (50) become its basket. A sector slightly short of a full
+basket keeps what it has down to `SECTOR_INDEX_MIN_SIZE` (40) — Communication
+Services runs at 48 — because dropping a whole sector distorts the read more
+than a 48-name equal weight does. The screener applies the same floor.
 
-Each tier is a separate index, scored and ranked entirely within itself: tier
-2's z-scores are against tier-2 peers, its breadth counts tier-2 names, its
-rank order is its own. That is the point of separating them. Financial
-Services currently sits last on tier 1 at −0.33 and fourth on tier 2 at +1.30;
-averaged into one 50-name basket that divergence would vanish, which is exactly
-the reading worth having.
+The machinery still supports multiple consecutive tiers (`config.SECTOR_TIERS`
+is a tuple, `tier_slice` cuts any block, and the app grows a tab bar whenever
+the feed carries more than one list), so splitting the fifty again later is a
+config change, not a rewrite. The two-tier experiment is recoverable from
+history; its headline finding — the big banks falling while the next 25
+financials climbed — now shows up inside one grid instead, as a Financial
+Services block that is orange on the left edge and green through the middle.
 
-A tier short of a full basket is skipped rather than padded — Communication
-Services has only 23 clean names below its top 25, so it has no tier 2 and the
-second list carries 10 sectors rather than 11. `--benchmark` scores each tier
-against the SPDRs separately; tier 2 agrees less (0.59 against 0.75) because a
-cap-weighted fund is dominated by precisely the names tier 2 excludes.
-
-Correlation spans every name in every tier, so a family found on one list keeps
-its members on the other.
-
-```bash
-export FMP_API_KEY=...          # or API_KEY, or paste it into config.py
-python3 sector_index.py                # build + rank
-python3 sector_index.py --members      # also print each index's 25 names
-python3 sector_index.py --benchmark    # score the SPDR sector ETFs alongside
-python3 sector_index.py --no-fetch     # rerun off the cache, no network
-python3 sector_index.py --force        # refetch every price series
-```
-
-Writes to `out/`: `sector_etf_ranking.json` (full payload incl. constituents),
-`sector_etf_ranking.csv` (the ranking table), `sector_etf_constituents.csv`
-(members with their per-name scores, sector z and 4% weights). Prices cache to
-`cache/sector_prices.pkl` and refresh daily.
-
-There is no HTML report any more. `sector_report.py` and `--report` were
-dropped once the phone build became the only surface anyone reads; recover
-them from git history if that ever changes.
+At 50 names the equal-weight baskets track the cap-weighted SPDRs more closely
+than either 25-name tier did (rank correlation 0.83).
 
 ## Phone build
 
@@ -52,7 +29,7 @@ them from git history if that ever changes.
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/qhyPiJz5zGNkKZw6KiSW6** — open it in Expo
+**Live link: https://snack.expo.dev/NSWl-i1IV_mSvbLHcu3Ua** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -84,30 +61,19 @@ dependencies for Expo Go to resolve.
 
 ### One design system
 
-The tiers get their own screens behind a segmented control, not more rows on
-one screen — 525 cells on a single scroll is a wall, not a phone screen — and
-both wear the same design. An earlier build gave each tier its own idiom (neon
-glow on one, blueprint outlines on the other) and per-sector hues; it
-photographed badly and read worse, light-mode outlines especially. The current
-system is deliberately quiet:
+The look is brokerage-dark first and deliberately quiet: near-black ground,
+charcoal sector cards, one type scale with mono reserved for numbers and
+tickers, no glow, no shadows. One diverging ramp carries the within-sector z —
+acid green (`#9fe519`) leading, signal orange lagging, magnitude as depth,
+saturating at ±1.5σ. Light mode keeps the same vocabulary with the green
+pulled down to `#4f9c00` so contrast holds on white; tints are capped in both
+schemes so the theme ink is readable on every cell. The acid-green-on-black
+palette is the user's standing choice; the restraint around it is the
+maintainer's.
 
-- Neutral ground, white sector cards, one type scale, mono reserved for
-  numbers and tickers.
-- One muted diverging ramp carries the within-sector z: teal leading, rust
-  lagging, magnitude as depth, saturating at ±1.5σ. Tints are capped so the
-  theme ink is readable on every cell in both colour schemes — no per-cell
-  text-colour juggling, no glow, no shadows.
-- Selection dims unrelated names to 28% rather than blacking them out, so the
-  page still reads as a page with one family in focus; the chosen cell borders
-  in ink, its kin border in the single interactive accent.
-
-Sector identity comes from position and label, not hue. Direction is back in
-the grid — a square says at a glance whether the name is ahead of or behind
-its sector, which the hue-per-sector scheme had traded away.
-
-Selection survives the tab switch on purpose: tap NVDA on the first list, move
-to the second, and its relatives there are still lit, with a banner naming
-whose family is on screen so the dimming does not read as a fault.
+Selection dims unrelated names to 28% rather than blacking them out, so the
+page still reads as a page with one family in focus; the chosen cell borders
+in ink, its kin in the bright accent.
 
 ### Family highlighting and haptics
 

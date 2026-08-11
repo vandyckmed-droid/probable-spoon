@@ -81,23 +81,18 @@ SNAPSHOTS_INDEX_LIMIT = 20      # how many recent snapshots the report lists
 
 # Sector "ETFs": 25-name equal-weight sector indices, ranked on
 # volatility-adjusted 9-1 momentum (see sector_index.py).
-SECTOR_INDEX_SIZE           = 25        # constituents per synthetic sector ETF
+SECTOR_INDEX_SIZE           = 50        # constituents per synthetic sector ETF
+SECTOR_INDEX_MIN_SIZE       = 40        # keep a slightly short basket over dropping a sector
 SECTOR_CANDIDATES_PER_SECTOR= 95        # screener shortlist before data-quality cuts
 
-# Two rungs of the same ladder. Each sector's clean names are sorted by
-# liquidity and cut into consecutive blocks of SECTOR_INDEX_SIZE, so tier 2 is
-# the next 25 down rather than a different kind of company. Each tier is its
-# own equal-weight index, scored and ranked entirely within itself.
+# One basket per sector: its 50 most liquid clean names. The machinery still
+# supports multiple consecutive tiers (the app hides the tab bar when there is
+# only one), so splitting again later is a config change, not a rewrite.
 SECTOR_TIERS = (
     {
         "key": "top",
-        "label": "Top 25",
-        "note": "the 25 most-traded companies in each sector",
-    },
-    {
-        "key": "next",
-        "label": "Next 25",
-        "note": "the 25 directly below those — same rules, one rung down",
+        "label": "Top 50",
+        "note": "the 50 most-traded companies in each sector",
     },
 )
 SCREEN_MIN_MARKET_CAP       = 2_000_000_000
