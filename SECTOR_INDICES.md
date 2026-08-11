@@ -22,6 +22,23 @@ name-level heatmap (`sector_report.py`, also runnable on its own against an
 existing JSON payload). Prices cache to `cache/sector_prices.pkl` and
 refresh daily.
 
+## Phone build
+
+`sector_snack.py` renders the same payload as an Expo Snack app and publishes
+it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
+step, no App Store round trip.
+
+```bash
+python3 sector_snack.py            # write out/App.js
+python3 sector_snack.py --publish  # ...and upload, printing the links
+```
+
+The 11 x 25 heatmap does not survive a phone screen, so the phone build
+inverts it: a tappable list of sectors, each opening into its own 25 names as
+chips shaded on the same within-sector z. Data is baked into the bundle, so
+the app needs no network once loaded, and it reads the phone's colour scheme.
+Pure React Native primitives — no dependencies for Expo Go to resolve.
+
 ## Universe
 
 1. FMP `company-screener` over NYSE / NASDAQ / AMEX, US-domiciled, actively
