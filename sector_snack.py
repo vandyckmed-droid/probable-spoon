@@ -26,7 +26,10 @@ import config
 SNACK_SAVE_URL = "https://exp.host/--/api/v2/snack/save"
 SNACK_SDK_VERSION = "57.0.0"
 # Ships inside Expo Go, so Snack resolves it without a build step.
-SNACK_DEPENDENCIES = {"expo-haptics": "*"}
+SNACK_DEPENDENCIES = {
+    "expo-haptics": "*",
+    "@react-native-async-storage/async-storage": "*",
+}
 
 SHORT_NAMES = {
     "Communication Services": "Communication",
@@ -57,6 +60,12 @@ import {
   StatusBar, Platform, RefreshControl, useWindowDimensions,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// The watchlist outlives the session; losing it on every launch would make
+// it pointless. Storage failures degrade to in-memory, never to a crash.
+const WL_KEY = 'watchlist-v1';
+const saveWl = (wl) => { try { AsyncStorage.setItem(WL_KEY, JSON.stringify(wl)).catch(() => {}); } catch (e) {} };
 
 // Haptics are decoration: a simulator, a web preview or a phone with the
 // feature switched off must not take the screen down with it.
@@ -127,24 +136,31 @@ function ordinal(n) {
 }
 
 /**
- * One ticker. Selection dims the unrelated rather than blacking them out —
- * the page should still read as a page, just with one family in focus.
+ * One ticker. A tap adds it to (or drops it from) the watchlist — marked by an
+ * ink ring. A press-and-hold reveals its correlation family, dimming the
+ * unrelated rather than blacking them out so the page still reads as a page.
  */
-function Cell({ c, t, w, dark, state, onPress }) {
+function Cell({ c, z, t, w, dark, state, watched, onPress, onLongPress }) {
+  const border =
+    state === 'chosen' ? t.ink
+    : state === 'kin' ? t.accent
+    : watched ? t.ink
+    : 'transparent';
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={300}
       style={{ width: w, padding: 1.5, opacity: state === 'muted' ? 0.28 : 1 }}
     >
       <View
         style={{
-          backgroundColor: cellFill(c.z, t, dark),
+          backgroundColor: cellFill(z, t, dark),
           borderRadius: 4,
           paddingVertical: 4,
           alignItems: 'center',
           borderWidth: 1,
-          borderColor:
-            state === 'chosen' ? t.ink : state === 'kin' ? t.accent : 'transparent',
+          borderColor: border,
         }}
       >
         <Text numberOfLines={1} style={{ color: t.ink, fontFamily: MONO, fontSize: 10 }}>
@@ -190,7 +206,7 @@ function Readout({ p, t }) {
   );
 }
 
-function SectorBlock({ s, t, dark, cols, peak, pick, onPick }) {
+function SectorBlock({ s, t, dark, cols, peak, pick, zOf, wl, onWatch, onHold }) {
   const tone = s.score < 0 ? t.neg : t.pos;
   const w = 100 / cols + '%';
   const mine = pick && pick.sector === s.name && pick.tier === s.tier ? pick : null;
@@ -249,11 +265,14 @@ function SectorBlock({ s, t, dark, cols, peak, pick, onPick }) {
           <Cell
             key={c.ticker}
             c={c}
+            z={zOf(c)}
             t={t}
             w={w}
             dark={dark}
             state={stateOf(c.ticker)}
-            onPress={() => onPick(s, c, i)}
+            watched={!!wl[c.ticker]}
+            onPress={() => onWatch(c)}
+            onLongPress={() => onHold(s, c, i)}
           />
         ))}
       </View>
@@ -301,11 +320,8 @@ function Tabs({ tiers, active, onPick, t }) {
   );
 }
 
-/**
- * A selection made on the other list still lights names here, so say whose
- * family is on screen — otherwise the dimming looks like a fault.
- */
-function CrossTier({ pick, here, t, onClear }) {
+/** Names the active family, and is the one obvious way out of it. */
+function FamilyBar({ pick, t, onClear }) {
   return (
     <Pressable
       onPress={onClear}
@@ -322,14 +338,109 @@ function CrossTier({ pick, here, t, onClear }) {
       }}
     >
       <Text style={{ color: t.muted, fontSize: 11.5, flex: 1 }} numberOfLines={1}>
-        Lit up: what moves with {pick.ticker} · {here} of {pick.kin.length} on this list
+        Lit up: what moves with {pick.ticker}
+        {pick.kin.length ? ' · ' + pick.kin.length + ' names' : ''}
       </Text>
       <Text style={{ color: t.accent, fontSize: 11.5, fontWeight: '600' }}>Clear</Text>
     </Pressable>
   );
 }
 
-function Legend({ t, dark }) {
+/** The tapped-together list. Chips, not rows — it should stay one glance tall. */
+function WatchCard({ wl, lookup, t, onRemove }) {
+  const rows = Object.keys(wl).filter((k) => lookup[k]).sort();
+  if (!rows.length) return null;
+  return (
+    <View
+      style={{
+        backgroundColor: t.surface,
+        borderWidth: 1,
+        borderColor: t.rule,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginBottom: 10,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+        <Text style={{ color: t.ink, fontSize: 13.5, fontWeight: '600', flex: 1 }}>Watchlist</Text>
+        <Text style={{ color: t.faint, fontSize: 10.5 }}>{rows.length} · tap a name to remove</Text>
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 7 }}>
+        {rows.map((k) => {
+          const c = lookup[k];
+          const tone = c.score === null ? t.muted : c.score < 0 ? t.neg : t.pos;
+          return (
+            <Pressable
+              key={k}
+              onPress={() => onRemove(k)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'baseline',
+                borderWidth: 1,
+                borderColor: t.rule,
+                borderRadius: 6,
+                paddingVertical: 4,
+                paddingHorizontal: 8,
+                marginRight: 4,
+                marginBottom: 4,
+              }}
+            >
+              <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11 }}>{k}</Text>
+              <Text style={{ color: tone, fontFamily: MONO, fontSize: 10, marginLeft: 5 }}>
+                {c.score === null ? '—' : signed(c.score)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+/** Same score, two yardsticks: a name against its sector, or against everyone. */
+function ViewToggle({ view, onPick, t }) {
+  const opts = [
+    { k: 'sector', label: 'By sector' },
+    { k: 'global', label: 'Whole market' },
+  ];
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: t.ruleSoft,
+        borderRadius: 9,
+        padding: 3,
+        marginTop: 10,
+      }}
+    >
+      {opts.map((o) => {
+        const on = view === o.k;
+        return (
+          <Pressable
+            key={o.k}
+            onPress={() => { if (!on) { tapped(); onPick(o.k); } }}
+            style={{
+              flex: 1,
+              paddingVertical: 6,
+              alignItems: 'center',
+              borderRadius: 7,
+              backgroundColor: on ? t.surface : 'transparent',
+              borderWidth: 1,
+              borderColor: on ? t.rule : 'transparent',
+            }}
+          >
+            <Text style={{ color: on ? t.ink : t.faint, fontSize: 12.5, fontWeight: '600' }}>
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function Legend({ t, dark, view }) {
   const steps = [-1.5, -0.75, 0, 0.75, 1.5];
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
@@ -345,7 +456,9 @@ function Legend({ t, dark }) {
         />
       ))}
       <Text style={{ color: t.faint, fontSize: 10.5, marginLeft: 4 }}>
-        leading — always against its own sector
+        {view === 'global'
+          ? 'leading — against every company on the page'
+          : 'leading — against its own sector'}
       </Text>
     </View>
   );
@@ -457,6 +570,8 @@ export default function App() {
   const [pick, setPick] = useState(null);
   const [how, setHow] = useState(false);
   const [tab, setTab] = useState(0);
+  const [view, setView] = useState('sector');
+  const [wl, setWl] = useState({});
   // Cells stay legible rather than stretching: more room means more columns.
   const { width } = useWindowDimensions();
   const cols = width >= 430 ? 8 : width >= 380 ? 7 : width >= 340 ? 6 : 5;
@@ -492,6 +607,25 @@ export default function App() {
 
   useEffect(() => { load(false); }, [load]);
 
+  useEffect(() => {
+    try {
+      AsyncStorage.getItem(WL_KEY)
+        .then((raw) => { if (raw) setWl(JSON.parse(raw)); })
+        .catch(() => {});
+    } catch (e) {}
+  }, []);
+
+  const toggleWatch = useCallback((c) => {
+    tapped();
+    setWl((prev) => {
+      const next = { ...prev };
+      if (next[c.ticker]) delete next[c.ticker];
+      else next[c.ticker] = true;
+      saveWl(next);
+      return next;
+    });
+  }, []);
+
   const tiers = React.useMemo(() => tiersOf(data), [data]);
   const active = tiers[Math.min(tab, tiers.length - 1)];
 
@@ -501,14 +635,16 @@ export default function App() {
     const m = {};
     tiers.forEach((tier) =>
       tier.sectors.forEach((s) =>
-        s.constituents.forEach((c) => { m[c.ticker] = { sector: s.name, tier: tier.key }; })
+        s.constituents.forEach((c) => {
+          m[c.ticker] = { sector: s.name, tier: tier.key, name: c.name, score: c.score };
+        })
       )
     );
     return m;
   }, [tiers]);
 
   const choose = useCallback((sector, c, i) => {
-    tapped();
+    pulled();
     setPick((prev) => {
       if (prev && prev.tier === sector.tier && prev.ticker === c.ticker) return null;
       const kin = ((data.peers || {})[c.ticker] || []).map(([ticker, r]) => ({
@@ -528,8 +664,7 @@ export default function App() {
   }, [data, homeOf]);
 
   const peak = Math.max(...active.sectors.map((s) => Math.abs(s.score)));
-  const elsewhere = pick && pick.tier !== active.key;
-  const kinHere = elsewhere ? pick.kin.filter((k) => k.tier === active.key).length : 0;
+  const zOf = view === 'global' ? (c) => c.g : (c) => c.z;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.ground }}>
@@ -555,19 +690,16 @@ export default function App() {
         {tiers.length > 1 && (
           <Tabs tiers={tiers} active={tiers.indexOf(active)} onPick={setTab} t={t} />
         )}
-        {!!active.note && (
-          <Text style={{ color: t.faint, fontSize: 11, marginTop: 8, lineHeight: 16 }}>
-            {active.note}
-          </Text>
-        )}
 
-        <Legend t={t} dark={dark} />
+        <ViewToggle view={view} onPick={setView} t={t} />
+
+        <Legend t={t} dark={dark} view={view} />
 
         <View style={{ height: 14 }} />
 
-        {elsewhere && (
-          <CrossTier pick={pick} here={kinHere} t={t} onClear={() => { tapped(); setPick(null); }} />
-        )}
+        <WatchCard wl={wl} lookup={homeOf} t={t} onRemove={(k) => toggleWatch({ ticker: k })} />
+
+        {pick && <FamilyBar pick={pick} t={t} onClear={() => { tapped(); setPick(null); }} />}
 
         <Details t={t} open={how} onToggle={() => setHow(!how)} meta={data.meta} />
 
@@ -580,7 +712,10 @@ export default function App() {
             cols={cols}
             peak={peak}
             pick={pick}
-            onPick={choose}
+            zOf={zOf}
+            wl={wl}
+            onWatch={toggleWatch}
+            onHold={choose}
           />
         ))}
 
@@ -640,6 +775,21 @@ def build_data(payload: dict) -> dict:
         for tier in tiers
     ]
 
+    # Global z: the same score sized against every name on the page rather
+    # than the ~50 in its own sector — the whole-market shading view.
+    everyone = [c for tier in rendered for s in tier for c in s["constituents"]]
+    scored = [c["score"] for c in everyone if c["score"] is not None]
+    if len(scored) > 1:
+        mean = sum(scored) / len(scored)
+        sd = (sum((x - mean) ** 2 for x in scored) / (len(scored) - 1)) ** 0.5
+    else:
+        mean, sd = 0.0, 0.0
+    for c in everyone:
+        c["g"] = (
+            None if (c["score"] is None or sd == 0)
+            else round((c["score"] - mean) / sd, 3)
+        )
+
     details = [
         {
             "title": "What the number means",
@@ -679,6 +829,16 @@ def build_data(payload: dict) -> dict:
             ),
         },
         {
+            "title": "Two ways to shade",
+            "body": (
+                "'By sector' colours each company against the others in its own "
+                "sector, so every sector shows its own leaders and laggards. "
+                "'Whole market' colours everyone against the full page on one "
+                "scale — a strong sector goes green nearly wall to wall, a weak "
+                "one sinks together."
+            ),
+        },
+        {
             "title": "Worth knowing",
             "body": (
                 "The baskets use today's most-traded companies applied to past prices, so the "
@@ -700,9 +860,9 @@ def build_data(payload: dict) -> dict:
             ],
             "blurb": (
                 f"{len(rendered[0])} corners of the US market, best first, by how steadily "
-                f"they climbed over nine months. Green squares are leading their sector, "
-                f"orange squares are lagging it — the deeper, the stronger. Tap any "
-                f"company to light up everything that moves with it."
+                f"they climbed over nine months. Green squares are leading, orange are "
+                f"lagging — the deeper, the stronger. Tap a company to build a "
+                f"watchlist; press and hold to light up everything that moves with it."
             ),
             "footer": (
                 "Prices from FMP, adjusted for splits and dividends. Information only — "

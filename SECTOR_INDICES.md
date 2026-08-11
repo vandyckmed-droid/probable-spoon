@@ -29,7 +29,7 @@ than either 25-name tier did (rank correlation 0.83).
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/NSWl-i1IV_mSvbLHcu3Ua** — open it in Expo
+**Live link: https://snack.expo.dev/o2s3Dlc4uGJjrEOCKhrSv** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -75,9 +75,25 @@ Selection dims unrelated names to 28% rather than blacking them out, so the
 page still reads as a page with one family in focus; the chosen cell borders
 in ink, its kin in the bright accent.
 
+### Views, watchlist and gestures
+
+The grid shades on one of two yardsticks, switched by a segmented control.
+"By sector" uses the within-sector z; "Whole market" uses `g`, the same score
+z-scored across every name on the page, computed in `build_data` so any
+payload age gets it. Both feed the same `cellFill` — only the number differs —
+and the legend re-labels itself so the scale on screen is never ambiguous.
+
+A tap curates a watchlist: the cell gets an ink ring, the name appears in a
+chip card above the grid with its score, a chip tap removes it. The list
+persists through `@react-native-async-storage/async-storage` (bundled with
+Expo Go, declared in the manifest); storage failures degrade to in-memory,
+never to a crash. A press-and-hold (300ms) is what reveals the correlation
+family now, with a firmer haptic than the watchlist tick and a bar naming
+whose family is lit — the bar is also the way out.
+
 ### Family highlighting and haptics
 
-Tapping a cell selects it and its family: `payload["peers"]`, the
+Holding a cell selects it and its family: `payload["peers"]`, the
 `PEER_COUNT` names whose daily log returns correlate highest with it over the
 scoring window, above `PEER_MIN_CORRELATION`. The peer search deliberately
 spans every sector and both tiers — DAL surfaces UAL and AAL, then the cruise

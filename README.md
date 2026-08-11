@@ -3,16 +3,20 @@
 Which corners of the US stock market are climbing, and which companies inside
 them are doing the climbing.
 
-**The app: https://snack.expo.dev/NSWl-i1IV_mSvbLHcu3Ua**
+**The app: https://snack.expo.dev/o2s3Dlc4uGJjrEOCKhrSv**
 
 Open that on a phone with [Expo Go](https://expo.dev/go) installed, or scan the
 QR code on the page. There is nothing to install and no account to make.
 
 It shows eleven sectors ranked best to worst, each with its 50 biggest,
 most-traded companies laid out as a grid — about 550 names on one scroll.
-Green squares are leading their own sector, orange squares are lagging it,
-and the deeper the colour the stronger the signal. Tap any square to name the
-company and light up everything anywhere on the page that moves with it.
+Green squares are leading, orange squares are lagging, and the deeper the
+colour the stronger the signal. A toggle switches the yardstick: shade each
+company against its own sector, or against the whole page at once.
+
+Tap any square to add the company to a watchlist that survives restarts;
+press and hold to name it and light up everything anywhere on the page that
+moves with it.
 
 Tap any square and it lights up everything across the whole screen that moves
 with it, dimming the rest — the airlines light the cruise lines, the chipmakers

@@ -302,3 +302,48 @@ def test_both_tiers_share_one_design_system():
     assert "SKINS" not in src
     assert "shadowColor" not in src
     assert "shadowRadius" not in src
+
+
+# ---------- watchlist, views, gestures ----------
+
+def test_global_z_travels_beside_the_sector_z():
+    data = sector_snack.build_data(_payload())
+    everyone = [c for key in ("sectors", "sectors2") for s in data[key] for c in s["constituents"]]
+    gs = [c["g"] for c in everyone if c["g"] is not None]
+
+    assert all("g" in c for c in everyone)
+    assert abs(sum(gs) / len(gs)) < 1e-6                      # centred on the whole page
+    assert all(c["g"] is None for c in everyone if c["score"] is None)
+
+
+def test_global_z_is_a_different_yardstick_from_sector_z():
+    """A middling name in a strong sector should read stronger globally."""
+    data = sector_snack.build_data(_payload())
+    everyone = [c for key in ("sectors", "sectors2") for s in data[key] for c in s["constituents"]]
+
+    assert any(c["g"] != c["z"] for c in everyone if c["g"] is not None)
+
+
+def test_tap_is_watchlist_hold_is_family():
+    src = sector_snack.render_app(_payload())
+
+    assert "onPress={() => onWatch(c)}" in src
+    assert "onLongPress={() => onHold(s, c, i)}" in src
+    assert "delayLongPress={300}" in src
+
+
+def test_watchlist_survives_restarts_and_storage_failures():
+    src = sector_snack.render_app(_payload())
+
+    assert "AsyncStorage.getItem(WL_KEY)" in src
+    assert "AsyncStorage.setItem(WL_KEY, JSON.stringify(wl))" in src
+    # Storage failures degrade to in-memory, never to a crash.
+    assert ".catch(() => {}); } catch (e) {}" in src
+
+
+def test_the_two_views_share_one_scale_function():
+    """Both views shade through cellFill; only the z they feed it differs."""
+    src = sector_snack.render_app(_payload())
+
+    assert "const zOf = view === 'global' ? (c) => c.g : (c) => c.z;" in src
+    assert src.count("function cellFill") == 1
