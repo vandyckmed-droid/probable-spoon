@@ -29,7 +29,7 @@ than either 25-name tier did (rank correlation 0.83).
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/o2s3Dlc4uGJjrEOCKhrSv** — open it in Expo
+**Live link: https://snack.expo.dev/d7HLCmRgWI7pBYs-FFCO3** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -83,17 +83,23 @@ z-scored across every name on the page, computed in `build_data` so any
 payload age gets it. Both feed the same `cellFill` — only the number differs —
 and the legend re-labels itself so the scale on screen is never ambiguous.
 
-A tap curates a watchlist: the cell gets an ink ring, the name appears in a
-chip card above the grid with its score, a chip tap removes it. The list
-persists through `@react-native-async-storage/async-storage` (bundled with
-Expo Go, declared in the manifest); storage failures degrade to in-memory,
-never to a crash. A press-and-hold (300ms) is what reveals the correlation
-family now, with a firmer haptic than the watchlist tick and a bar naming
-whose family is lit — the bar is also the way out.
+Everything is a tap — a long-press variant shipped briefly and was cut as
+undiscoverable. Tapping a cell selects it: the readout names the company,
+the correlation family lights, and a watch toggle sits in the readout
+("Add to watchlist" / "On watchlist — tap to remove"). Watched names keep an
+ink ring in the grid and appear as chips in a card above it, each removable
+with a tap. The list persists through
+`@react-native-async-storage/async-storage` (bundled with Expo Go, declared
+in the manifest); storage failures degrade to in-memory, never to a crash.
+
+Fills are deliberately soft — dark-mode tints cap at 38% of the accent, light
+at 31% — because saturation is not the signal, depth relative to neighbours
+is. Cells run 4–6 to a row with real padding; a first cut at 5–8 columns
+with near-full-saturation fills read as a wall of paint on a real phone.
 
 ### Family highlighting and haptics
 
-Holding a cell selects it and its family: `payload["peers"]`, the
+Tapping a cell selects it and its family: `payload["peers"]`, the
 `PEER_COUNT` names whose daily log returns correlate highest with it over the
 scoring window, above `PEER_MIN_CORRELATION`. The peer search deliberately
 spans every sector and both tiers — DAL surfaces UAL and AAL, then the cruise

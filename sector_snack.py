@@ -123,7 +123,7 @@ function cellFill(z, t, dark) {
   const side = z < 0 ? t.neg : t.pos;
   const m = Math.min(Math.abs(z) / 1.5, 1);
   const base = dark ? t.surface : '#ffffff';
-  return mix(base, side, dark ? 0.09 + 0.48 * m : 0.07 + 0.36 * m);
+  return mix(base, side, dark ? 0.06 + 0.32 * m : 0.05 + 0.26 * m);
 }
 
 const pct = (x) => (x === null || x === undefined ? '—' : Math.round(x * 100) + '%');
@@ -136,11 +136,11 @@ function ordinal(n) {
 }
 
 /**
- * One ticker. A tap adds it to (or drops it from) the watchlist — marked by an
- * ink ring. A press-and-hold reveals its correlation family, dimming the
- * unrelated rather than blacking them out so the page still reads as a page.
+ * One ticker. A tap selects it — naming it, lighting its correlation family
+ * and offering the watchlist toggle in the readout below. Watched names keep
+ * an ink ring. Fills stay soft: the shade is the signal, not a floodlight.
  */
-function Cell({ c, z, t, w, dark, state, watched, onPress, onLongPress }) {
+function Cell({ c, z, t, w, dark, state, watched, onPress }) {
   const border =
     state === 'chosen' ? t.ink
     : state === 'kin' ? t.accent
@@ -149,21 +149,22 @@ function Cell({ c, z, t, w, dark, state, watched, onPress, onLongPress }) {
   return (
     <Pressable
       onPress={onPress}
-      onLongPress={onLongPress}
-      delayLongPress={300}
-      style={{ width: w, padding: 1.5, opacity: state === 'muted' ? 0.28 : 1 }}
+      style={{ width: w, padding: 2.5, opacity: state === 'muted' ? 0.3 : 1 }}
     >
       <View
         style={{
           backgroundColor: cellFill(z, t, dark),
-          borderRadius: 4,
-          paddingVertical: 4,
+          borderRadius: 6,
+          paddingVertical: 8,
           alignItems: 'center',
           borderWidth: 1,
           borderColor: border,
         }}
       >
-        <Text numberOfLines={1} style={{ color: t.ink, fontFamily: MONO, fontSize: 10 }}>
+        <Text
+          numberOfLines={1}
+          style={{ color: t.ink, fontFamily: MONO, fontSize: 11, letterSpacing: 0.3 }}
+        >
           {c.ticker}
         </Text>
       </View>
@@ -175,7 +176,7 @@ function Cell({ c, z, t, w, dark, state, watched, onPress, onLongPress }) {
  * What the selected name is, and how much of its family lives outside its own
  * sector — the number that makes the cross-sector highlighting worth having.
  */
-function Readout({ p, t }) {
+function Readout({ p, t, watched, onWatch }) {
   const tone = p.score === null ? t.muted : p.score < 0 ? t.neg : t.pos;
   const away = p.kin.filter((k) => k.sector !== p.sector).length;
   const family = p.kin.length
@@ -202,11 +203,27 @@ function Readout({ p, t }) {
         {family}
         {p.kin.length ? ' · ' + p.kin.map((k) => k.ticker).join(' ') : ''}
       </Text>
+      <Pressable
+        onPress={onWatch}
+        style={{
+          alignSelf: 'flex-start',
+          borderWidth: 1,
+          borderColor: t.accent,
+          borderRadius: 6,
+          paddingVertical: 4,
+          paddingHorizontal: 10,
+          marginTop: 8,
+        }}
+      >
+        <Text style={{ color: t.accent, fontSize: 11.5, fontWeight: '600' }}>
+          {watched ? 'On watchlist — tap to remove' : 'Add to watchlist'}
+        </Text>
+      </Pressable>
     </View>
   );
 }
 
-function SectorBlock({ s, t, dark, cols, peak, pick, zOf, wl, onWatch, onHold }) {
+function SectorBlock({ s, t, dark, cols, peak, pick, zOf, wl, onPick, onWatch }) {
   const tone = s.score < 0 ? t.neg : t.pos;
   const w = 100 / cols + '%';
   const mine = pick && pick.sector === s.name && pick.tier === s.tier ? pick : null;
@@ -271,13 +288,19 @@ function SectorBlock({ s, t, dark, cols, peak, pick, zOf, wl, onWatch, onHold })
             dark={dark}
             state={stateOf(c.ticker)}
             watched={!!wl[c.ticker]}
-            onPress={() => onWatch(c)}
-            onLongPress={() => onHold(s, c, i)}
+            onPress={() => onPick(s, c, i)}
           />
         ))}
       </View>
 
-      {mine && <Readout p={mine} t={t} />}
+      {mine && (
+        <Readout
+          p={mine}
+          t={t}
+          watched={!!wl[mine.ticker]}
+          onWatch={() => onWatch({ ticker: mine.ticker })}
+        />
+      )}
     </View>
   );
 }
@@ -574,7 +597,7 @@ export default function App() {
   const [wl, setWl] = useState({});
   // Cells stay legible rather than stretching: more room means more columns.
   const { width } = useWindowDimensions();
-  const cols = width >= 430 ? 8 : width >= 380 ? 7 : width >= 340 ? 6 : 5;
+  const cols = width >= 430 ? 6 : width >= 360 ? 5 : 4;
   const [data, setData] = useState(BAKED);
   const [state, setState] = useState(FEED.url ? 'checking' : 'baked');
   const [busy, setBusy] = useState(false);
@@ -644,7 +667,7 @@ export default function App() {
   }, [tiers]);
 
   const choose = useCallback((sector, c, i) => {
-    pulled();
+    tapped();
     setPick((prev) => {
       if (prev && prev.tier === sector.tier && prev.ticker === c.ticker) return null;
       const kin = ((data.peers || {})[c.ticker] || []).map(([ticker, r]) => ({
@@ -714,8 +737,8 @@ export default function App() {
             pick={pick}
             zOf={zOf}
             wl={wl}
+            onPick={choose}
             onWatch={toggleWatch}
-            onHold={choose}
           />
         ))}
 
@@ -861,8 +884,8 @@ def build_data(payload: dict) -> dict:
             "blurb": (
                 f"{len(rendered[0])} corners of the US market, best first, by how steadily "
                 f"they climbed over nine months. Green squares are leading, orange are "
-                f"lagging — the deeper, the stronger. Tap a company to build a "
-                f"watchlist; press and hold to light up everything that moves with it."
+                f"lagging — the deeper, the stronger. Tap a company to see everything "
+                f"that moves with it, and to add it to your watchlist."
             ),
             "footer": (
                 "Prices from FMP, adjusted for splits and dividends. Information only — "

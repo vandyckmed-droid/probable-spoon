@@ -3,7 +3,7 @@
 Which corners of the US stock market are climbing, and which companies inside
 them are doing the climbing.
 
-**The app: https://snack.expo.dev/o2s3Dlc4uGJjrEOCKhrSv**
+**The app: https://snack.expo.dev/d7HLCmRgWI7pBYs-FFCO3**
 
 Open that on a phone with [Expo Go](https://expo.dev/go) installed, or scan the
 QR code on the page. There is nothing to install and no account to make.
@@ -14,9 +14,8 @@ Green squares are leading, orange squares are lagging, and the deeper the
 colour the stronger the signal. A toggle switches the yardstick: shade each
 company against its own sector, or against the whole page at once.
 
-Tap any square to add the company to a watchlist that survives restarts;
-press and hold to name it and light up everything anywhere on the page that
-moves with it.
+Tap any square to name the company, light up everything anywhere on the page
+that moves with it, and add it to a watchlist that survives restarts.
 
 Tap any square and it lights up everything across the whole screen that moves
 with it, dimming the rest — the airlines light the cruise lines, the chipmakers

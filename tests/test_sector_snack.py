@@ -324,12 +324,23 @@ def test_global_z_is_a_different_yardstick_from_sector_z():
     assert any(c["g"] != c["z"] for c in everyone if c["g"] is not None)
 
 
-def test_tap_is_watchlist_hold_is_family():
+def test_one_gesture_only_tap_selects_and_the_readout_watches():
+    """No long press anywhere; the watch toggle lives in the readout."""
     src = sector_snack.render_app(_payload())
 
-    assert "onPress={() => onWatch(c)}" in src
-    assert "onLongPress={() => onHold(s, c, i)}" in src
-    assert "delayLongPress={300}" in src
+    assert "onLongPress" not in src
+    assert "delayLongPress" not in src
+    assert "onPress={() => onPick(s, c, i)}" in src
+    assert "'On watchlist — tap to remove' : 'Add to watchlist'" in src
+
+
+def test_the_heatmap_stays_soft_and_the_cells_roomy():
+    """Saturation is not the signal: fills cap well below full colour."""
+    src = sector_snack.render_app(_payload())
+
+    assert "dark ? 0.06 + 0.32 * m : 0.05 + 0.26 * m" in src
+    assert "width >= 430 ? 6 : width >= 360 ? 5 : 4" in src
+    assert "paddingVertical: 8," in src
 
 
 def test_watchlist_survives_restarts_and_storage_failures():
