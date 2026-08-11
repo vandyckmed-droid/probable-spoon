@@ -509,9 +509,6 @@ def main() -> None:
     ap.add_argument("--no-fetch", action="store_true", help="cache only, no network")
     ap.add_argument("--members", action="store_true", help="print constituents")
     ap.add_argument(
-        "--report", action="store_true", help="also write the HTML report"
-    )
-    ap.add_argument(
         "--benchmark", action="store_true",
         help="score the SPDR sector ETFs on the same window as a cross-check",
     )
@@ -530,9 +527,6 @@ def main() -> None:
         benchmark(payload)
         print()
     written = write_outputs(payload)
-    if args.report:
-        import sector_report
-        written.append(sector_report.write_report(payload))
     for path in written:
         print(f"wrote {path}")
 

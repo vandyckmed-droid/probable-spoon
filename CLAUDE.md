@@ -46,24 +46,18 @@ The API key arrives as `API_KEY` in the hosted environment (`FMP_API_KEY`
 also works locally); `config.py` takes either.
 
 ```bash
-python3 sector_index.py --benchmark --report   # refetch, rank, write out/
-python3 sector_snack.py                        # rebuild feed/sector_feed.json
+python3 sector_index.py --benchmark   # refetch prices, rank, write out/
+python3 sector_snack.py --push-feed   # rebuild the feed and publish it
 ```
 
-Then publish the feed to the data-only `feed` branch — that is what the live
-app reads, and it is the only step that makes a refresh visible on a phone:
+That second command is the whole refresh: it pushes the numbers to the
+data-only `feed` branch, which is what the live app reads. It is a no-op when
+the numbers have not moved, so running it twice is harmless.
 
-```bash
-git fetch origin feed
-git worktree add /tmp/feed feed
-cp feed/sector_feed.json /tmp/feed/sector_feed.json
-git -C /tmp/feed commit -am "Refresh the feed" && git -C /tmp/feed push
-git worktree remove /tmp/feed
-```
-
-Republishing the Snack is **not** part of a refresh, and doing it mints a new
-link that strands the one the user has saved. Republish only when the app's
-*code* changes, and update the link in `SECTOR_INDICES.md` when you do.
+Republishing the Snack is **not** part of a refresh. `--publish` re-uploads the
+app's code and mints a new link, stranding whatever link the user saved. Use it
+only when the app's *code* changes, and update the link in `README.md` and
+`SECTOR_INDICES.md` in the same commit when you do.
 
 Markets close 16:00 New York. Prices are only complete after that.
 

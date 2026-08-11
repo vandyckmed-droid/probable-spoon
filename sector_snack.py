@@ -7,11 +7,15 @@ cell costs one line and returns the company name. Labels are plain words with
 the maths behind a "How this works" panel. The numbers are fetched at run time
 with the published snapshot as the offline fallback.
 
-    python3 sector_snack.py            # write feed/sector_feed.json + out/App.js
-    python3 sector_snack.py --publish  # ...and push it to snack.expo.dev
+    python3 sector_snack.py              # write out/sector_feed.json + out/App.js
+    python3 sector_snack.py --push-feed  # ...and publish the numbers (a refresh)
+    python3 sector_snack.py --publish    # ...and re-upload the app itself (new link!)
 """
 import argparse
 import json
+import shutil
+import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -221,7 +225,20 @@ function Legend({ t }) {
   );
 }
 
-function Freshness({ state, asOf, t }) {
+/**
+ * Whole days since the prices were taken. The feed reports "up to date" about
+ * itself, which says nothing about whether the feed is being refreshed at all —
+ * this is the number that catches an abandoned feed.
+ */
+function ageInDays(iso) {
+  const then = Date.parse(iso + 'T00:00:00Z');
+  if (isNaN(then)) return null;
+  return Math.floor((Date.now() - then) / 86400000);
+}
+
+function Freshness({ state, asOf, asOfISO, t }) {
+  const age = ageInDays(asOfISO);
+  const stale = age !== null && age > FEED.staleAfterDays;
   // The as-of date shows in every state, including while the feed is in flight —
   // a screen of numbers with no date on it is worse than a slightly stale one.
   const line = {
@@ -230,14 +247,24 @@ function Freshness({ state, asOf, t }) {
     live: 'Up to date — numbers from ' + asOf + '.',
     stale: 'Offline, so showing the saved numbers from ' + asOf + '.',
   }[state];
-  const dot = { baked: t.faint, checking: t.faint, live: t.pos, stale: t.neg }[state];
+  const dot = stale
+    ? t.neg
+    : { baked: t.faint, checking: t.faint, live: t.pos, stale: t.neg }[state];
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
-      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dot, marginRight: 7 }} />
+    <View style={{ flexDirection: 'row', marginTop: 12 }}>
+      <View
+        style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dot, marginRight: 7, marginTop: 5 }}
+      />
       <Text style={{ color: t.faint, fontSize: 12, flex: 1, lineHeight: 17 }}>
         {line}
         {FEED.url ? ' Pull down to refresh.' : ''}
+        {stale && (
+          <Text style={{ color: t.neg }}>
+            {' '}
+            These are {age} days old — nobody has refreshed them.
+          </Text>
+        )}
       </Text>
     </View>
   );
@@ -348,7 +375,7 @@ export default function App() {
           {data.meta.blurb}
         </Text>
 
-        <Freshness state={state} asOf={data.meta.asOf} t={t} />
+        <Freshness state={state} asOf={data.meta.asOf} asOfISO={data.meta.asOfISO} t={t} />
         <Legend t={t} />
 
         <View style={{ height: 14 }} />
@@ -464,6 +491,7 @@ def build_data(payload: dict) -> dict:
     return {
         "meta": {
             "asOf": pretty_date(payload["as_of"]),
+            "asOfISO": payload["as_of"],
             "blurb": (
                 f"{len(sectors)} corners of the US market, best first, by how steadily they "
                 f"climbed over nine months. Every square is one of the "
@@ -522,7 +550,11 @@ def pretty_date(iso: str) -> str:
 def render_app(payload: dict, *, feed_url: str = "") -> str:
     data = json.dumps(build_data(payload), separators=(",", ":"))
     feed = json.dumps(
-        {"url": feed_url or "", "timeoutMs": config.SECTOR_FEED_TIMEOUT_MS},
+        {
+            "url": feed_url or "",
+            "timeoutMs": config.SECTOR_FEED_TIMEOUT_MS,
+            "staleAfterDays": config.SECTOR_STALE_AFTER_DAYS,
+        },
         separators=(",", ":"),
     )
     return (
@@ -553,9 +585,42 @@ def publish(source: str, *, name: str, description: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def push_feed(source: Path) -> str:
+    """Copy the built feed onto the data-only branch and push it.
+
+    The branch is checked out in a throwaway worktree rather than here: the
+    feed branch shares no history with the code branches, and switching this
+    working tree onto it would be a large, pointless, and easily-botched
+    checkout.
+    """
+    branch = config.SECTOR_FEED_BRANCH
+    run = lambda *a: subprocess.run(a, check=True, capture_output=True, text=True)
+
+    run("git", "fetch", "origin", branch)
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp) / branch
+        run("git", "worktree", "add", "--quiet", str(tree), f"origin/{branch}")
+        try:
+            target = tree / config.SECTOR_FEED_BRANCH_FILE
+            if target.read_text(encoding="utf-8") == source.read_text(encoding="utf-8"):
+                return "unchanged — nothing to push"
+            shutil.copyfile(source, target)
+            stamp = json.loads(source.read_text(encoding="utf-8"))["meta"]["asOfISO"]
+            run("git", "-C", str(tree), "add", config.SECTOR_FEED_BRANCH_FILE)
+            run("git", "-C", str(tree), "commit", "-m", f"Refresh the feed: prices through {stamp}")
+            run("git", "-C", str(tree), "push", "origin", f"HEAD:{branch}")
+            return f"pushed — prices through {stamp}"
+        finally:
+            run("git", "worktree", "remove", "--force", str(tree))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--publish", action="store_true", help="upload to snack.expo.dev")
+    ap.add_argument(
+        "--push-feed", action="store_true",
+        help=f"push the rebuilt feed to the {config.SECTOR_FEED_BRANCH} branch (this is a refresh)",
+    )
     ap.add_argument(
         "--feed-url",
         default=config.SECTOR_FEED_URL,
@@ -573,9 +638,9 @@ def main() -> None:
 
     # The feed and the baked snapshot are the same object, so a phone running
     # the published bundle and one running off the feed render identically.
-    # It lands in a tracked directory, not out/: this file is the thing that
-    # gets published, and its history is what a "what moved this week" view
-    # would eventually read.
+    # This copy is a build artefact; the published one on the feed branch is
+    # the single source of truth, and its commit history is what a "what moved
+    # this week" view would eventually read.
     feed = Path(config.SECTOR_FEED_FILE)
     feed.parent.mkdir(parents=True, exist_ok=True)
     feed.write_text(
@@ -591,6 +656,9 @@ def main() -> None:
         print(f"feed url   {args.feed_url}")
     else:
         print("feed url   (none — the app runs on the baked snapshot)")
+
+    if args.push_feed:
+        print(f"feed       {push_feed(feed)}")
 
     if args.publish:
         try:

@@ -8,7 +8,6 @@ volatility-adjusted 9-1 log return.
 export FMP_API_KEY=...          # or API_KEY, or paste it into config.py
 python3 sector_index.py                # build + rank
 python3 sector_index.py --members      # also print each index's 25 names
-python3 sector_index.py --report       # also write out/sector_report.html
 python3 sector_index.py --benchmark    # score the SPDR sector ETFs alongside
 python3 sector_index.py --no-fetch     # rerun off the cache, no network
 python3 sector_index.py --force        # refetch every price series
@@ -16,11 +15,12 @@ python3 sector_index.py --force        # refetch every price series
 
 Writes to `out/`: `sector_etf_ranking.json` (full payload incl. constituents),
 `sector_etf_ranking.csv` (the ranking table), `sector_etf_constituents.csv`
-(members with their per-name scores, sector z and 4% weights). `--report`
-adds `sector_report.html`, a standalone page with the ranking and the
-name-level heatmap (`sector_report.py`, also runnable on its own against an
-existing JSON payload). Prices cache to `cache/sector_prices.pkl` and
-refresh daily.
+(members with their per-name scores, sector z and 4% weights). Prices cache to
+`cache/sector_prices.pkl` and refresh daily.
+
+There is no HTML report any more. `sector_report.py` and `--report` were
+dropped once the phone build became the only surface anyone reads; recover
+them from git history if that ever changes.
 
 ## Phone build
 
@@ -28,15 +28,23 @@ refresh daily.
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/ujPb3oZlUrXlS8anTZ0ek** — open it in Expo
+**Live link: https://snack.expo.dev/pwdk0qRpvr3Y5KnxIxKeq** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
 ```bash
-python3 sector_snack.py            # write feed/sector_feed.json + out/App.js
-python3 sector_snack.py --publish  # ...and upload, printing the links
+python3 sector_snack.py                 # write out/sector_feed.json + out/App.js
+python3 sector_snack.py --push-feed     # ...and publish the numbers — this is a refresh
+python3 sector_snack.py --publish       # ...and re-upload the app, minting a NEW link
 python3 sector_snack.py --feed-url ''   # build a bundle that never phones home
 ```
+
+`--push-feed` is the refresh: it copies the built feed into a throwaway
+worktree of the `feed` branch, commits it stamped with the price date, and
+pushes. It is a no-op when the numbers are unchanged, so it is safe to run
+twice. `--publish` is the other thing entirely — it re-uploads the app's code
+and mints a new link, stranding whatever link the user has saved, so it belongs
+only to a code change.
 
 The 11 x 25 heatmap is kept rather than inverted. Each sector is a compact
 header — rank, name, score, then one line of gloss and stats — above a grid of
@@ -67,10 +75,19 @@ the baked snapshot, with the reason and the as-of date on screen. The date
 renders in *every* state, including mid-fetch; a screen of undated numbers is
 worse than a visibly stale one.
 
-`feed/sector_feed.json` is that feed, byte-identical to what gets baked in, so
-a phone on the feed and a phone offline render the same screen. It is tracked
-rather than written to `out/` because it is the artifact that gets published —
-and its history is what a "what moved this week" view would read.
+"Up to date" only ever means *agrees with the feed*, which says nothing about
+whether the feed is still being refreshed. So the app also ages the price date
+itself and, past `SECTOR_STALE_AFTER_DAYS`, says how many days old the numbers
+are in the warning colour. The threshold is 5 days: long enough to stay silent
+across a holiday weekend, short enough that an abandoned feed is obvious.
+
+`out/sector_feed.json` is that feed, byte-identical to what gets baked in, so
+a phone on the feed and a phone offline render the same screen. It is a build
+artefact and deliberately untracked here: the published copy on the `feed`
+branch is the single source of truth, and keeping a second tracked copy beside
+the code only created two things to keep in step. That branch's commit history
+— one commit per refresh, stamped with the price date — is what a "what moved
+this week" view would read.
 
 It is published on the **`feed` branch** — an orphan branch carrying only
 `sector_feed.json` and a README, no code and no shared history with the code
@@ -79,14 +96,7 @@ cannot be stranded by a merge or a branch deletion. `raw.githubusercontent.com`
 serves it with `access-control-allow-origin: *` and a 5-minute cache, so the
 Snack web preview can read it too.
 
-```bash
-python3 sector_snack.py                        # refresh feed/sector_feed.json
-git fetch origin feed && git worktree add /tmp/feed feed
-cp feed/sector_feed.json /tmp/feed/sector_feed.json
-git -C /tmp/feed commit -am "Refresh the feed" && git -C /tmp/feed push
-```
-
-Nothing needs republishing after that — phones pick it up on next open or on
+Nothing needs republishing after a refresh — phones pick it up on next open or on
 pull-to-refresh. If the feed ever 404s the app falls back to the snapshot baked
 in at publish time and says so on screen.
 

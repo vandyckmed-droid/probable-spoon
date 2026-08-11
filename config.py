@@ -105,7 +105,9 @@ SECTOR_FEED_URL             = (
 )
 SECTOR_FEED_BRANCH          = "feed"     # data-only orphan branch; no code, no shared history
 SECTOR_FEED_TIMEOUT_MS      = 6000       # then fall back to the baked snapshot
-SECTOR_FEED_FILE            = "feed/sector_feed.json"   # tracked: this is what gets published
+SECTOR_FEED_FILE            = "out/sector_feed.json"    # build output; the published copy
+SECTOR_FEED_BRANCH_FILE     = "sector_feed.json"        # ...lives on the feed branch alone
+SECTOR_STALE_AFTER_DAYS     = 5         # beyond this the app says how old the numbers are
 
 # Universe / market
 MARKET_TICKER = "VTI"

@@ -177,6 +177,21 @@ def test_feed_and_baked_snapshot_are_the_same_object():
     assert baked == sector_snack.build_data(payload)
 
 
+def test_feed_carries_a_parseable_date_for_the_staleness_check():
+    """asOf is prose for the reader; asOfISO is what the age arithmetic needs."""
+    meta = sector_snack.build_data(_payload())["meta"]
+
+    assert meta["asOfISO"] == "2026-08-10"
+    assert meta["asOf"] == "10 August 2026"
+
+
+def test_staleness_threshold_travels_with_the_feed_config():
+    src = sector_snack.render_app(_payload(), feed_url="https://example.test/f.json")
+
+    assert _feed_const(src)["staleAfterDays"] == config.SECTOR_STALE_AFTER_DAYS
+    assert "function ageInDays(" in src
+
+
 def test_the_app_guards_against_a_broken_feed():
     """A 404, a timeout or junk JSON must not blank the screen."""
     src = sector_snack.render_app(_payload(), feed_url="https://example.test/f.json")
