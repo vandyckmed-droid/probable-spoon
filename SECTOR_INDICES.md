@@ -29,7 +29,7 @@ than either 25-name tier did (rank correlation 0.83).
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/d7HLCmRgWI7pBYs-FFCO3** — open it in Expo
+**Live link: https://snack.expo.dev/BIdX1mt5R8rpf10YDVhQ6** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -47,74 +47,46 @@ twice. `--publish` is the other thing entirely — it re-uploads the app's code
 and mints a new link, stranding whatever link the user has saved, so it belongs
 only to a code change.
 
-The 11 x 25 heatmap is kept rather than inverted. Each sector is a compact
-header — rank, name, score, then one line of gloss and stats — above a grid of
-its 25 tickers, wrapped to as many columns as the screen affords (5 to 8, off
-`useWindowDimensions`) and shaded on the same within-sector z. All 275 names
-are therefore on one scroll with nothing behind a tap; tapping a cell spends a
-single line to name the company and give its place in the sector.
+The heatmap is gone. Two builds shaded ticker cells with tinted fills and both
+failed the same way: blending acid green into a dark surface reads as washed-out
+pea soup, and a wall of 550 equal cells asks the reader to decode colour — the
+weakest visual channel — for names that are mostly mid-pack noise anyway. The
+user called it, and the replacement moves every magnitude onto *position*:
 
-An earlier build hid the names behind a per-sector expand, which cost roughly
-925pt of scroll to read one sector's 25 names against about 84pt now. It reads
-the phone's colour scheme and uses pure React Native primitives — no
-dependencies for Expo Go to resolve.
+- **Market map first.** All sectors as rows with bars on one shared axis, so
+  the page answers its own question before any scrolling. The axis adapts: an
+  all-positive market runs bars from the left edge; mixed signs put the zero
+  line where zero really is. Tapping a row jumps to that sector's card.
+- **A dot strip per sector.** Every company is one full-saturation dot placed
+  by its z on a horizontal axis — centre line, hairlines at ±1.5σ, colliding
+  dots stacking downward into lanes (`packLanes`). Density reads as shape: a
+  clump left with three dots far right *is* "carried by a few names". Position
+  is clamped at ±2.5σ so one freak name cannot squash the rest onto the line.
+- **The tails named outright.** The three best and three worst appear as rows —
+  place, ticker, name, a thin bar, the score — because those are the names a
+  reader actually wants; the middle is on the strip as shape, one tap from a
+  readout. A ★ marks watched names in the rows.
 
-### One design system
-
-The look is brokerage-dark first and deliberately quiet: near-black ground,
-charcoal sector cards, one type scale with mono reserved for numbers and
-tickers, no glow, no shadows. One diverging ramp carries the within-sector z —
-acid green (`#9fe519`) leading, signal orange lagging, magnitude as depth,
-saturating at ±1.5σ. Light mode keeps the same vocabulary with the green
-pulled down to `#4f9c00` so contrast holds on white; tints are capped in both
-schemes so the theme ink is readable on every cell. The acid-green-on-black
-palette is the user's standing choice; the restraint around it is the
-maintainer's.
-
-Selection dims unrelated names to 28% rather than blacking them out, so the
-page still reads as a page with one family in focus; the chosen cell borders
-in ink, its kin in the bright accent.
+The palette rule that fell out of this: **the accent colours appear only at
+full strength on small marks** — dots, 3–4pt bars, numbers — and never as a
+tinted area fill. `cellFill`/`mix` are deleted; a test now enforces their
+absence. Colour carries direction only; position carries magnitude.
 
 ### Views, watchlist and gestures
 
-The grid shades on one of two yardsticks, switched by a segmented control.
-"By sector" uses the within-sector z; "Whole market" uses `g`, the same score
-z-scored across every name on the page, computed in `build_data` so any
-payload age gets it. Both feed the same `cellFill` — only the number differs —
-and the legend re-labels itself so the scale on screen is never ambiguous.
+The strips place dots on one of two yardsticks, switched by a segmented
+control: "By sector" uses the within-sector z, "Whole market" uses `g`, the
+same score z-scored across every name on the page. Both feed the same `X()`
+position function — a test asserts there is exactly one.
 
-Everything is a tap — a long-press variant shipped briefly and was cut as
-undiscoverable. Tapping a cell selects it: the readout names the company,
-the correlation family lights, and a watch toggle sits in the readout
-("Add to watchlist" / "On watchlist — tap to remove"). Watched names keep an
-ink ring in the grid and appear as chips in a card above it, each removable
-with a tap. The list persists through
-`@react-native-async-storage/async-storage` (bundled with Expo Go, declared
-in the manifest); storage failures degrade to in-memory, never to a crash.
-
-Fills are deliberately soft — dark-mode tints cap at 38% of the accent, light
-at 31% — because saturation is not the signal, depth relative to neighbours
-is. Cells run 4–6 to a row with real padding; a first cut at 5–8 columns
-with near-full-saturation fills read as a wall of paint on a real phone.
-
-### Family highlighting and haptics
-
-Tapping a cell selects it and its family: `payload["peers"]`, the
-`PEER_COUNT` names whose daily log returns correlate highest with it over the
-scoring window, above `PEER_MIN_CORRELATION`. The peer search deliberately
-spans every sector and both tiers — DAL surfaces UAL and AAL, then the cruise
-lines and the consumer lenders; NVDA surfaces the semis, then Vertiv out of
-Industrials and MPWR and IBKR down on the second list. A name whose closest
-relatives are three sectors away is the signal, not noise to be filtered out.
-Some names correlate with nothing above the floor and simply report that.
-
-Haptics are a selection tick on tap, an impact on pull-to-refresh and a
-success notification when new numbers land. Every call goes through `buzz()`,
-which swallows anything thrown: a simulator or a phone with the feature off
-must lose the buzz, not the screen. `expo-haptics` ships inside Expo Go, so it
-is declared in the Snack manifest and needs no build step — it is the only
-dependency, and a test asserts that every import is either built in or
-declared.
+Everything is a tap. Tapping a dot or a row selects the name: the readout
+names the company, gives its place in the sector, lists its correlation
+family, and offers the watch toggle. Unrelated dots dim to 25% while a family
+is lit; kin dots ring in the bright accent, the chosen dot rings in ink and
+grows a step. Watched names keep an ink ring on their dot, a ★ in the rows,
+and appear as removable chips in a card above the map. The list persists via
+`@react-native-async-storage/async-storage`; storage failures degrade to
+in-memory, never to a crash.
 
 ### Why the numbers are fetched, not baked
 
@@ -171,27 +143,28 @@ and name survives, unscorable names stay as nulls, the basket size is
 data-driven rather than a hardcoded 25, feed and baked snapshot are the same
 object, and the bundle imports nothing beyond `react` and `react-native`.
 
-The rendered bundle is also driven through a headless React renderer against
-four feeds — good, 404, junk JSON, and one that never responds — asserting all
-275 cells render up front, that tapping one names the company and tapping it
-again closes it, that a good feed goes live, and that the other three fall
-back with the as-of date still on screen.
+The rendered bundle is also bundled (esbuild, react-native aliased to a
+~40-line RN-to-CSS stub) and driven in a real Chromium against four feeds —
+good, 404, junk JSON, and one that never responds — asserting a good feed goes
+live, the other three fall back with the as-of date still on screen, and that
+tapping a name opens the readout, the watch toggle sticks, and the view
+switch relabels the page. The same stub renders both colour schemes for
+screenshots before any publish.
 
 ## Universe
 
 1. FMP `company-screener` over NYSE / NASDAQ / AMEX, US-domiciled, actively
    trading, not an ETF or fund, market cap > $2bn, > 300k shares/day.
 2. Secondary share classes dropped, so one line per company.
-3. Top 45 per sector on screener dollar volume become candidates.
-4. Candidates need a complete price history across the scoring window; the 25
-   survivors with the highest median 63-day dollar volume become the index.
-
-Sectors with fewer than 25 clean liquid names are skipped rather than padded.
+3. Top 95 per sector on screener dollar volume become candidates.
+4. Candidates need a complete price history across the scoring window; the 50
+   survivors with the highest median 63-day dollar volume become the index
+   (short baskets keep what they have down to 40 — see Baskets above).
 
 ## Index
 
 Daily-rebalanced equal weight — each day the index return is the mean of its
-25 constituents' simple returns, chained into a level series based at 100.
+constituents' simple returns, chained into a level series based at 100.
 Prices are FMP adjusted closes, so splits and dividends are already handled.
 
 Membership is *today's* most liquid names applied to past prices. That is fine
@@ -219,15 +192,15 @@ but not the other. The ratio is unitless and scale-invariant in index level.
 
 Every constituent is scored with the identical 9-1 treatment applied to its own
 adjusted-close series, then ranked and z-scored *within its own sector* — the
-peer group is the other 24 names, so the z reads as dispersion inside the
+peer group is its ~49 sector peers, so the z reads as dispersion inside the
 sector rather than a market-wide level. The z is deliberately not winsorised:
 the repo's 5/95 clip is built for a 500-name cross-section and inside a
-25-name bucket it collapses the top two names onto one value. Consumers clamp
-the display scale instead — the heatmap saturates at ±1.5σ.
+50-name bucket it collapses the best few names onto one value. Consumers clamp
+the display scale instead — the app clamps dot positions at ±2.5σ.
 
-Each sector also reports `breadth`, the share of its 25 names with a positive
+Each sector also reports `breadth`, the share of its names with a positive
 score on their own. It separates a sector carried by a few names (Technology,
-72%) from one that moved together (Industrials and Energy, 92%).
+35 of 50 up) from one that moved together (Energy, 44 of 50 up).
 
 Tunable in `config.py`: `SECTOR_INDEX_SIZE`, `MOM_9_1_LONG_DAYS`,
 `MOM_9_1_SKIP_DAYS`, `LIQUIDITY_WINDOW_DAYS`, `SCREEN_MIN_MARKET_CAP`,

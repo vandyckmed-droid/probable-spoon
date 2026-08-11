@@ -54,7 +54,7 @@ SECTOR_GLOSS = {
 }
 
 APP_TEMPLATE = r"""
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView, ScrollView, View, Text, Pressable, useColorScheme,
   StatusBar, Platform, RefreshControl, useWindowDimensions,
@@ -84,11 +84,12 @@ const BAKED = __DATA__;
 const FEED = __FEED__;
 
 /**
- * One design system, both colour schemes, brokerage-dark first: near-black
- * ground, acid green for names leading their sector, signal orange for names
- * lagging it. Everything else stays neutral so the data is the only thing
- * with a voice. Light mode keeps the same vocabulary with the green pulled
- * down to hold contrast on white.
+ * One design system, both colour schemes, brokerage-dark first. The palette
+ * appears only at full strength — dots, bars, numbers — never as a tinted
+ * area fill: blending acid green into a dark surface is how the old build
+ * turned to pea soup. Position carries magnitude now; colour only carries
+ * direction. Light mode keeps the same vocabulary with the green pulled down
+ * to hold contrast on white.
  */
 const LIGHT = {
   ground: '#fafbf8', surface: '#ffffff', ink: '#151a12', muted: '#5a6357',
@@ -103,29 +104,6 @@ const DARK = {
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
 
-/** Blend two hex colours. t=0 keeps `from`, t=1 lands on `to`. */
-function mix(from, to, t) {
-  const parts = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const a = parts(from);
-  const b = parts(to);
-  return '#' + a
-    .map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0'))
-    .join('');
-}
-
-/**
- * Cell fill for a within-sector z. Direction picks the side of the scale,
- * magnitude picks the depth, saturating at ±1.5σ. The tint is capped so the
- * theme ink stays readable on every cell — no per-cell text colour juggling.
- */
-function cellFill(z, t, dark) {
-  if (z === null || z === undefined) return dark ? t.ruleSoft : t.ruleSoft;
-  const side = z < 0 ? t.neg : t.pos;
-  const m = Math.min(Math.abs(z) / 1.5, 1);
-  const base = dark ? t.surface : '#ffffff';
-  return mix(base, side, dark ? 0.06 + 0.32 * m : 0.05 + 0.26 * m);
-}
-
 const pct = (x) => (x === null || x === undefined ? '—' : Math.round(x * 100) + '%');
 const signed = (x) => (x >= 0 ? '+' : '') + x.toFixed(2);
 
@@ -135,39 +113,125 @@ function ordinal(n) {
   return n + (tail[(v - 20) % 10] || tail[v] || tail[0]);
 }
 
+const toneOf = (z, t) => (z === null || z === undefined ? t.faint : z < 0 ? t.neg : t.pos);
+
+// ---- the strip plot ---------------------------------------------------------
+
+const DOT = 8;        // dot diameter
+const LANE = 11;      // vertical pitch between stacked dots
+const MAX_LANES = 6;  // beyond this the mid-pack may overlap; that reads as density
+
 /**
- * One ticker. A tap selects it — naming it, lighting its correlation family
- * and offering the watchlist toggle in the readout below. Watched names keep
- * an ink ring. Fills stay soft: the shade is the signal, not a floodlight.
+ * Position along the axis for a z-score. Clamped at ±2.5σ so one freak name
+ * cannot squash everyone else onto the centre line; 47 keeps the outermost
+ * dot inside the track.
  */
-function Cell({ c, z, t, w, dark, state, watched, onPress }) {
-  const border =
-    state === 'chosen' ? t.ink
-    : state === 'kin' ? t.accent
-    : watched ? t.ink
-    : 'transparent';
+function X(z) {
+  const c = Math.max(-2.5, Math.min(2.5, z / 2.5));
+  return 50 + c * 47;
+}
+
+/**
+ * Stack colliding dots into lanes, greedily: each dot takes the first lane
+ * with room, and when every lane is crowded it takes the least-crowded one
+ * and accepts the overlap. Items must arrive sorted by x.
+ */
+function packLanes(items, plotW) {
+  const minGap = plotW > 0 ? ((DOT + 2) / plotW) * 100 : 4;
+  const last = [];
+  return items.map((it) => {
+    let lane = last.findIndex((x) => it.x - x >= minGap);
+    if (lane === -1) {
+      if (last.length < MAX_LANES) { lane = last.length; last.push(it.x); }
+      else {
+        let best = 0;
+        for (let i = 1; i < last.length; i++) if (last[i] < last[best]) best = i;
+        lane = best; last[best] = it.x;
+      }
+    } else {
+      last[lane] = it.x;
+    }
+    return lane;
+  });
+}
+
+/**
+ * Every company in the sector as one dot on a shared axis: right of the
+ * centre line leading, left lagging, distance is strength. Full-saturation
+ * colour on a small mark stays crisp where a tinted cell went muddy.
+ */
+function Strip({ s, t, zOf, plotW, pick, wl, onPick }) {
+  const placed = s.constituents
+    .map((c, i) => ({ c, i, z: zOf(c), x: X(zOf(c) === null || zOf(c) === undefined ? 0 : zOf(c)) }))
+    .sort((a, b) => a.x - b.x);
+  const laneOf = packLanes(placed, plotW);
+  const laneCount = Math.max(...laneOf, 0) + 1;
+  const height = laneCount * LANE + DOT;
+
   return (
-    <Pressable
-      onPress={onPress}
-      style={{ width: w, padding: 2.5, opacity: state === 'muted' ? 0.3 : 1 }}
-    >
-      <View
-        style={{
-          backgroundColor: cellFill(z, t, dark),
-          borderRadius: 6,
-          paddingVertical: 8,
-          alignItems: 'center',
-          borderWidth: 1,
-          borderColor: border,
-        }}
-      >
-        <Text
-          numberOfLines={1}
-          style={{ color: t.ink, fontFamily: MONO, fontSize: 11, letterSpacing: 0.3 }}
-        >
-          {c.ticker}
-        </Text>
+    <View style={{ height, marginTop: 10 }}>
+      {/* centre line and the ±1.5σ hairlines give the dots their scale */}
+      <View style={{ position: 'absolute', left: X(-1.5) + '%', top: 0, bottom: 0, width: 1, backgroundColor: t.ruleSoft }} />
+      <View style={{ position: 'absolute', left: X(1.5) + '%', top: 0, bottom: 0, width: 1, backgroundColor: t.ruleSoft }} />
+      <View style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, backgroundColor: t.rule }} />
+      {placed.map((p, k) => {
+        const c = p.c;
+        const unscored = p.z === null || p.z === undefined;
+        const chosen = pick && pick.ticker === c.ticker && pick.sector === s.name && pick.tier === s.tier;
+        const kin = pick && pick.kinSet[c.ticker];
+        const dim = pick && !chosen && !kin;
+        const ring = chosen ? t.ink : kin ? t.accent : wl[c.ticker] ? t.ink : 'transparent';
+        return (
+          <Pressable
+            key={c.ticker}
+            onPress={() => onPick(s, c, p.i)}
+            hitSlop={7}
+            style={{
+              position: 'absolute',
+              left: p.x + '%',
+              top: laneOf[k] * LANE + (chosen ? 0 : 1),
+              marginLeft: -(DOT / 2) - (chosen ? 1 : 0),
+              opacity: dim ? 0.25 : 1,
+            }}
+          >
+            <View
+              style={{
+                width: DOT + (chosen ? 2 : 0),
+                height: DOT + (chosen ? 2 : 0),
+                borderRadius: DOT,
+                backgroundColor: unscored ? 'transparent' : toneOf(p.z, t),
+                borderWidth: unscored ? 1 : chosen || kin || wl[c.ticker] ? 1.5 : 0,
+                borderColor: unscored ? t.faint : ring,
+              }}
+            />
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** One named company: place, ticker, name, a thin bar sized like its dot. */
+function NameRow({ c, place, t, zOf, pick, wl, onPress }) {
+  const z = zOf(c);
+  const tone = toneOf(c.score === null ? null : z, t);
+  const frac = z === null || z === undefined ? 0 : Math.min(Math.abs(z) / 2.5, 1);
+  const dim = pick && !pick.kinSet[c.ticker] && pick.ticker !== c.ticker;
+  return (
+    <Pressable onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4.5, opacity: dim ? 0.35 : 1 }}>
+      <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 10, width: 22 }}>{place}</Text>
+      <Text style={{ color: pick && pick.ticker === c.ticker ? t.accent : t.ink, fontFamily: MONO, fontSize: 11.5, width: 52 }}>
+        {c.ticker}
+      </Text>
+      <Text numberOfLines={1} style={{ color: t.muted, fontSize: 11.5, flex: 1, marginRight: 8 }}>
+        {c.name}{wl[c.ticker] ? ' ★' : ''}
+      </Text>
+      <View style={{ width: 54, height: 3, borderRadius: 2, backgroundColor: t.ruleSoft, marginRight: 8 }}>
+        <View style={{ width: frac * 100 + '%', height: 3, borderRadius: 2, backgroundColor: tone, alignSelf: z < 0 ? 'flex-end' : 'flex-start' }} />
       </View>
+      <Text style={{ color: c.score === null ? t.faint : tone, fontFamily: MONO, fontSize: 11.5, width: 44, textAlign: 'right' }}>
+        {c.score === null ? '—' : signed(c.score)}
+      </Text>
     </Pressable>
   );
 }
@@ -223,26 +287,28 @@ function Readout({ p, t, watched, onWatch }) {
   );
 }
 
-function SectorBlock({ s, t, dark, cols, peak, pick, zOf, wl, onPick, onWatch }) {
+/**
+ * One sector: header, plain-words stats, the strip of everyone, then the
+ * three best and three worst by name. The middle of a ranked-within-sector
+ * list is undifferentiated by construction — it belongs on the strip as
+ * shape, not in a table pretending every row matters equally.
+ */
+function SectorCard({ s, t, plotW, pick, zOf, wl, onPick, onWatch, onLayout }) {
   const tone = s.score < 0 ? t.neg : t.pos;
-  const w = 100 / cols + '%';
+  const scored = s.constituents.filter((c) => c.score !== null);
+  const head = scored.slice(0, 3);
+  const tail = scored.slice(-3);
+  const hidden = scored.length - head.length - tail.length;
   const mine = pick && pick.sector === s.name && pick.tier === s.tier ? pick : null;
-
-  const stateOf = (ticker) => {
-    if (!pick) return 'plain';
-    if (pick.tier === s.tier && pick.sector === s.name && pick.ticker === ticker) {
-      return 'chosen';
-    }
-    return pick.kinSet[ticker] ? 'kin' : 'muted';
-  };
 
   return (
     <View
+      onLayout={onLayout}
       style={{
         backgroundColor: t.surface,
         borderRadius: 10,
         borderWidth: 1,
-        borderColor: dark ? t.ruleSoft : t.rule,
+        borderColor: t.ruleSoft,
         paddingHorizontal: 12,
         paddingVertical: 11,
         marginBottom: 10,
@@ -261,35 +327,21 @@ function SectorBlock({ s, t, dark, cols, peak, pick, zOf, wl, onPick, onWatch })
         {s.etf ? ' · ' + s.etf + ' ' + signed(s.etfScore) : ''}
       </Text>
 
-      {/* Length is the score's size against the best sector; colour its direction. */}
-      <View
-        style={{
-          height: 3, marginTop: 7, marginLeft: 20, borderRadius: 2,
-          backgroundColor: t.ruleSoft, flexDirection: 'row', overflow: 'hidden',
-        }}
-      >
-        <View
-          style={{
-            width: Math.min(Math.abs(s.score) / peak, 1) * 100 + '%',
-            backgroundColor: tone,
-            borderRadius: 2,
-          }}
-        />
-      </View>
+      <Strip s={s} t={t} zOf={zOf} plotW={plotW} pick={pick} wl={wl} onPick={onPick} />
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 }}>
-        {s.constituents.map((c, i) => (
-          <Cell
-            key={c.ticker}
-            c={c}
-            z={zOf(c)}
-            t={t}
-            w={w}
-            dark={dark}
-            state={stateOf(c.ticker)}
-            watched={!!wl[c.ticker]}
-            onPress={() => onPick(s, c, i)}
-          />
+      <View style={{ marginTop: 6 }}>
+        {head.map((c, i) => (
+          <NameRow key={c.ticker} c={c} place={i + 1} t={t} zOf={zOf} pick={pick} wl={wl}
+            onPress={() => onPick(s, c, s.constituents.indexOf(c))} />
+        ))}
+        {hidden > 0 && (
+          <Text style={{ color: t.faint, fontSize: 10, textAlign: 'center', paddingVertical: 3 }}>
+            · {hidden} more in the middle — tap any dot ·
+          </Text>
+        )}
+        {hidden > -3 && tail.map((c, i) => (
+          <NameRow key={c.ticker} c={c} place={scored.length - tail.length + i + 1} t={t} zOf={zOf}
+            pick={pick} wl={wl} onPress={() => onPick(s, c, s.constituents.indexOf(c))} />
         ))}
       </View>
 
@@ -301,6 +353,123 @@ function SectorBlock({ s, t, dark, cols, peak, pick, zOf, wl, onPick, onWatch })
           onWatch={() => onWatch({ ticker: mine.ticker })}
         />
       )}
+    </View>
+  );
+}
+
+/**
+ * Every sector on one axis — the first thing on screen answers the page's
+ * question before any scrolling. Rows jump to their card.
+ */
+function MarketMap({ sectors, t, onJump }) {
+  // The axis adapts to the data: an all-positive quarter runs the bars from
+  // the left edge instead of parking half the row behind an empty negative
+  // side; when signs are mixed the zero line moves to where zero really is.
+  const lo = Math.min(0, ...sectors.map((s) => s.score));
+  const hi = Math.max(0, ...sectors.map((s) => s.score));
+  const span = hi - lo || 1;
+  const zero = ((0 - lo) / span) * 100;
+  return (
+    <View
+      style={{
+        backgroundColor: t.surface,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: t.ruleSoft,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginTop: 14,
+        marginBottom: 10,
+      }}
+    >
+      {sectors.map((s) => {
+        const tone = s.score < 0 ? t.neg : t.pos;
+        const frac = (Math.abs(s.score) / span) * 100;
+        return (
+          <Pressable
+            key={s.name}
+            onPress={() => { tapped(); onJump(s.name); }}
+            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4.5 }}
+          >
+            <Text numberOfLines={1} style={{ color: t.ink, fontSize: 12, width: 118 }}>{s.name}</Text>
+            <View style={{ flex: 1, height: 12, justifyContent: 'center' }}>
+              <View style={{ position: 'absolute', left: zero + '%', top: 0, bottom: 0, width: 1, backgroundColor: t.rule }} />
+              <View
+                style={{
+                  position: 'absolute',
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: tone,
+                  width: frac + '%',
+                  left: (s.score < 0 ? zero - frac : zero) + '%',
+                }}
+              />
+            </View>
+            <Text style={{ color: tone, fontFamily: MONO, fontSize: 11.5, width: 46, textAlign: 'right' }}>
+              {signed(s.score)}
+            </Text>
+          </Pressable>
+        );
+      })}
+      <Text style={{ color: t.faint, fontSize: 10, marginTop: 6 }}>
+        Steady-climb score, nine months. Tap a sector to jump to its companies.
+      </Text>
+    </View>
+  );
+}
+
+/** Same score, two yardsticks: a name against its sector, or against everyone. */
+function ViewToggle({ view, onPick, t }) {
+  const opts = [
+    { k: 'sector', label: 'By sector' },
+    { k: 'global', label: 'Whole market' },
+  ];
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: t.ruleSoft,
+        borderRadius: 9,
+        padding: 3,
+        marginTop: 10,
+      }}
+    >
+      {opts.map((o) => {
+        const on = view === o.k;
+        return (
+          <Pressable
+            key={o.k}
+            onPress={() => { if (!on) { tapped(); onPick(o.k); } }}
+            style={{
+              flex: 1,
+              paddingVertical: 6,
+              alignItems: 'center',
+              borderRadius: 7,
+              backgroundColor: on ? t.surface : 'transparent',
+              borderWidth: 1,
+              borderColor: on ? t.rule : 'transparent',
+            }}
+          >
+            <Text style={{ color: on ? t.ink : t.faint, fontSize: 12.5, fontWeight: '600' }}>
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function Legend({ t, view }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
+      <View style={{ width: DOT, height: DOT, borderRadius: DOT, backgroundColor: t.pos, marginRight: 5 }} />
+      <Text style={{ color: t.faint, fontSize: 10.5, marginRight: 10 }}>leading</Text>
+      <View style={{ width: DOT, height: DOT, borderRadius: DOT, backgroundColor: t.neg, marginRight: 5 }} />
+      <Text style={{ color: t.faint, fontSize: 10.5, flex: 1 }}>
+        lagging — each dot is one company; the further from the line, the stronger
+        {view === 'global' ? ', against every company on the page' : ', against its own sector'}
+      </Text>
     </View>
   );
 }
@@ -421,72 +590,6 @@ function WatchCard({ wl, lookup, t, onRemove }) {
   );
 }
 
-/** Same score, two yardsticks: a name against its sector, or against everyone. */
-function ViewToggle({ view, onPick, t }) {
-  const opts = [
-    { k: 'sector', label: 'By sector' },
-    { k: 'global', label: 'Whole market' },
-  ];
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        backgroundColor: t.ruleSoft,
-        borderRadius: 9,
-        padding: 3,
-        marginTop: 10,
-      }}
-    >
-      {opts.map((o) => {
-        const on = view === o.k;
-        return (
-          <Pressable
-            key={o.k}
-            onPress={() => { if (!on) { tapped(); onPick(o.k); } }}
-            style={{
-              flex: 1,
-              paddingVertical: 6,
-              alignItems: 'center',
-              borderRadius: 7,
-              backgroundColor: on ? t.surface : 'transparent',
-              borderWidth: 1,
-              borderColor: on ? t.rule : 'transparent',
-            }}
-          >
-            <Text style={{ color: on ? t.ink : t.faint, fontSize: 12.5, fontWeight: '600' }}>
-              {o.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-function Legend({ t, dark, view }) {
-  const steps = [-1.5, -0.75, 0, 0.75, 1.5];
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-      <Text style={{ color: t.faint, fontSize: 10.5, marginRight: 6 }}>lagging</Text>
-      {steps.map((z) => (
-        <View
-          key={z}
-          style={{
-            width: 18, height: 9, borderRadius: 2.5, marginRight: 2,
-            backgroundColor: cellFill(z, t, dark),
-            borderWidth: 1, borderColor: t.ruleSoft,
-          }}
-        />
-      ))}
-      <Text style={{ color: t.faint, fontSize: 10.5, marginLeft: 4 }}>
-        {view === 'global'
-          ? 'leading — against every company on the page'
-          : 'leading — against its own sector'}
-      </Text>
-    </View>
-  );
-}
-
 /**
  * Whole days since the prices were taken. The feed reports "up to date" about
  * itself, which says nothing about whether the feed is being refreshed at all —
@@ -595,9 +698,11 @@ export default function App() {
   const [tab, setTab] = useState(0);
   const [view, setView] = useState('sector');
   const [wl, setWl] = useState({});
-  // Cells stay legible rather than stretching: more room means more columns.
+  // The strip needs its own width in points to know when two dots collide.
   const { width } = useWindowDimensions();
-  const cols = width >= 430 ? 6 : width >= 360 ? 5 : 4;
+  const plotW = width - 2 * 14 - 2 * 12;   // screen padding, card padding
+  const scroller = useRef(null);
+  const cardY = useRef({});
   const [data, setData] = useState(BAKED);
   const [state, setState] = useState(FEED.url ? 'checking' : 'baked');
   const [busy, setBusy] = useState(false);
@@ -686,13 +791,13 @@ export default function App() {
     });
   }, [data, homeOf]);
 
-  const peak = Math.max(...active.sectors.map((s) => Math.abs(s.score)));
   const zOf = view === 'global' ? (c) => c.g : (c) => c.z;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.ground }}>
       <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} />
       <ScrollView
+        ref={scroller}
         contentContainerStyle={{ padding: 14, paddingBottom: 48 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -710,13 +815,22 @@ export default function App() {
 
         <Freshness state={state} asOf={data.meta.asOf} asOfISO={data.meta.asOfISO} t={t} />
 
+        <MarketMap
+          sectors={active.sectors}
+          t={t}
+          onJump={(name) => {
+            const y = cardY.current[active.key + ':' + name];
+            if (scroller.current && y !== undefined) scroller.current.scrollTo({ y: y - 6, animated: true });
+          }}
+        />
+
         {tiers.length > 1 && (
           <Tabs tiers={tiers} active={tiers.indexOf(active)} onPick={setTab} t={t} />
         )}
 
         <ViewToggle view={view} onPick={setView} t={t} />
 
-        <Legend t={t} dark={dark} view={view} />
+        <Legend t={t} view={view} />
 
         <View style={{ height: 14 }} />
 
@@ -727,18 +841,17 @@ export default function App() {
         <Details t={t} open={how} onToggle={() => setHow(!how)} meta={data.meta} />
 
         {active.sectors.map((s) => (
-          <SectorBlock
+          <SectorCard
             key={s.name}
             s={s}
             t={t}
-            dark={dark}
-            cols={cols}
-            peak={peak}
+            plotW={plotW}
             pick={pick}
             zOf={zOf}
             wl={wl}
             onPick={choose}
             onWatch={toggleWatch}
+            onLayout={(e) => { cardY.current[active.key + ':' + s.name] = e.nativeEvent.layout.y; }}
           />
         ))}
 
@@ -881,11 +994,12 @@ def build_data(payload: dict) -> dict:
                 {"key": t["key"], "label": t["label"], "note": t["note"]}
                 for t in tiers
             ],
+            # Describes the data only. What the screen looks like is the
+            # app's business — a feed line about squares outlived the squares.
             "blurb": (
-                f"{len(rendered[0])} corners of the US market, best first, by how steadily "
-                f"they climbed over nine months. Green squares are leading, orange are "
-                f"lagging — the deeper, the stronger. Tap a company to see everything "
-                f"that moves with it, and to add it to your watchlist."
+                f"{len(rendered[0])} corners of the US market, best first, by how "
+                f"steadily they climbed over nine months. Tap a company to see "
+                f"everything that moves with it, and to add it to your watchlist."
             ),
             "footer": (
                 "Prices from FMP, adjusted for splits and dividends. Information only — "

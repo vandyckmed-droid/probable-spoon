@@ -195,12 +195,13 @@ def test_feed_and_baked_snapshot_are_the_same_object():
     assert baked == sector_snack.build_data(payload)
 
 
-def test_the_grid_reads_direction_and_magnitude():
-    """One diverging scale: direction picks the side, |z| the depth."""
+def test_the_strip_reads_position_not_paint():
+    """Position carries magnitude, colour only direction — and it is clamped
+    so one freak name cannot squash everyone else onto the centre line."""
     src = sector_snack.render_app(_payload())
 
-    assert "const side = z < 0 ? t.neg : t.pos;" in src
-    assert "Math.min(Math.abs(z) / 1.5, 1)" in src           # saturates at ±1.5σ
+    assert "const toneOf = (z, t) => (z === null || z === undefined ? t.faint : z < 0 ? t.neg : t.pos);" in src
+    assert "Math.max(-2.5, Math.min(2.5, z / 2.5))" in src   # position clamps at ±2.5σ
     assert "hue" not in json.dumps(sector_snack.build_data(_payload())["sectors"][0])
 
 
@@ -330,17 +331,19 @@ def test_one_gesture_only_tap_selects_and_the_readout_watches():
 
     assert "onLongPress" not in src
     assert "delayLongPress" not in src
-    assert "onPress={() => onPick(s, c, i)}" in src
+    assert "onPress={() => onPick(s, c, p.i)}" in src        # every dot selects
     assert "'On watchlist — tap to remove' : 'Add to watchlist'" in src
 
 
-def test_the_heatmap_stays_soft_and_the_cells_roomy():
-    """Saturation is not the signal: fills cap well below full colour."""
+def test_no_tinted_fills_anywhere():
+    """The pea-soup rule: the palette appears only at full strength on small
+    marks. Nothing on screen blends the accent into a surface."""
     src = sector_snack.render_app(_payload())
 
-    assert "dark ? 0.06 + 0.32 * m : 0.05 + 0.26 * m" in src
-    assert "width >= 430 ? 6 : width >= 360 ? 5 : 4" in src
-    assert "paddingVertical: 8," in src
+    assert "cellFill" not in src
+    assert "function mix(" not in src
+    assert "function packLanes(" in src                       # dots stack, not shade
+    assert "hitSlop" in src                                   # a 8pt dot still gets a thumb-size target
 
 
 def test_watchlist_survives_restarts_and_storage_failures():
@@ -352,9 +355,9 @@ def test_watchlist_survives_restarts_and_storage_failures():
     assert ".catch(() => {}); } catch (e) {}" in src
 
 
-def test_the_two_views_share_one_scale_function():
-    """Both views shade through cellFill; only the z they feed it differs."""
+def test_the_two_views_share_one_axis():
+    """Both views place dots through X(); only the z they feed it differs."""
     src = sector_snack.render_app(_payload())
 
     assert "const zOf = view === 'global' ? (c) => c.g : (c) => c.z;" in src
-    assert src.count("function cellFill") == 1
+    assert src.count("function X(") == 1
