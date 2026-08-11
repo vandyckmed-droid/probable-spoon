@@ -293,6 +293,44 @@ def score_constituents(closes: pd.DataFrame, members: list[dict]) -> list[dict]:
 
 # --------------------------------------------------------------- pipeline ----
 
+def correlated_peers(closes: pd.DataFrame, tickers: list[str]) -> dict[str, list[dict]]:
+    """For each name, the handful that move most like it — across all sectors.
+
+    Deliberately not restricted to a name's own sector: the interesting groups
+    cut across the GICS lines, and a name whose closest company is three
+    sectors away is telling you something the sector average hides.
+
+    Correlation is on daily log returns over the same window the score uses,
+    so the two readings describe the same stretch of time.
+    """
+    px = closes[[t for t in tickers if t in closes.columns]].dropna(axis=1, how="any")
+    if px.shape[1] < 2:
+        return {}
+
+    start, end = window_bounds(len(px))
+    rets = np.log(px / px.shift(1)).iloc[max(start, 1):end + 1]
+    # A name that never moved has no correlation with anything; leave it out
+    # rather than letting a zero-variance column produce NaNs across the row.
+    rets = rets.loc[:, rets.std(ddof=1) > 0]
+    if rets.shape[1] < 2:
+        return {}
+
+    corr = rets.corr()
+    # Copy-on-write hands back a read-only block, so blank the diagonal — a name
+    # is not its own peer — on an array we own.
+    arr = corr.to_numpy(copy=True)
+    np.fill_diagonal(arr, np.nan)
+    corr = pd.DataFrame(arr, index=corr.index, columns=corr.columns)
+
+    peers: dict[str, list[dict]] = {}
+    for ticker in corr.columns:
+        row = corr[ticker].dropna()
+        row = row[row >= config.PEER_MIN_CORRELATION]
+        top = row.nlargest(config.PEER_COUNT)
+        peers[ticker] = [{"ticker": t, "r": round(float(r), 3)} for t, r in top.items()]
+    return peers
+
+
 def build(*, force: bool = False, no_fetch: bool = False) -> dict:
     """Run the whole build and return the ranked result payload."""
     print("screening liquid universe...")
@@ -357,6 +395,10 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
     for i, s in enumerate(sectors, 1):
         s["rank"] = i
 
+    chosen_tickers = [c["ticker"] for s in sectors for c in s["constituents"]]
+    print(f"correlating {len(chosen_tickers)} name(s)...")
+    peers = correlated_peers(closes, chosen_tickers)
+
     return {
         "as_of": str(closes.index[-1].date()),
         "generated": dt.date.today().isoformat(),
@@ -373,6 +415,7 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
             ),
         },
         "sectors": sectors,
+        "peers": peers,
     }
 
 

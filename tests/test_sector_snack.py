@@ -136,14 +136,23 @@ def test_render_bakes_the_data_into_the_bundle():
     assert len(baked["sectors"]) == 2
 
 
-def test_render_has_no_dependencies_to_resolve():
-    """Expo Go must load it with nothing to install."""
+def test_every_import_is_one_snack_can_resolve():
+    """Anything not built in has to be declared, or Expo Go fails to load it."""
     src = sector_snack.render_app(_payload())
     # Anchored on the statement terminator so prose containing "from '" is skipped.
-    imports = re.findall(r"from '([^']+)';\s*$", src, re.M)
+    imports = set(re.findall(r"from '([^']+)';\s*$", src, re.M))
 
-    assert imports                                            # the regex still finds them
-    assert set(imports) == {"react", "react-native"}
+    assert {"react", "react-native"} <= imports
+    assert imports - {"react", "react-native"} == set(sector_snack.SNACK_DEPENDENCIES)
+
+
+def test_haptics_never_take_the_screen_down():
+    """A phone with the feature off must lose the buzz, not the app."""
+    src = sector_snack.render_app(_payload())
+
+    assert "const buzz = (fn) => { try { fn(); } catch (e) {} };" in src
+    for call in ("Haptics.selectionAsync", "Haptics.impactAsync", "Haptics.notificationAsync"):
+        assert f"buzz(() => {call}" in src
 
 
 # ---------- the live feed ----------
@@ -175,6 +184,37 @@ def test_feed_and_baked_snapshot_are_the_same_object():
     baked = json.loads(re.search(r"^const BAKED = (.*);$", src, re.M).group(1))
 
     assert baked == sector_snack.build_data(payload)
+
+
+def test_every_sector_gets_its_own_colour():
+    data = sector_snack.build_data(_payload())
+    hues = [s["hue"] for s in data["sectors"]]
+
+    assert all(re.fullmatch(r"#[0-9a-f]{6}", h) for h in hues)
+    assert len(set(hues)) == len(hues)
+    # Every sector the pipeline can emit needs one, or it silently falls back.
+    assert set(sector_snack.SECTOR_HUE) == set(sector_snack.SECTOR_GLOSS)
+    assert len(set(sector_snack.SECTOR_HUE.values())) == len(sector_snack.SECTOR_HUE)
+
+
+def test_peers_ride_along_as_compact_pairs():
+    payload = _payload()
+    payload["peers"] = {
+        "TE0": [{"ticker": "UT1", "r": 0.81}, {"ticker": "TE1", "r": 0.62}],
+        "TE1": [],                                    # nothing correlated enough
+    }
+    peers = sector_snack.build_data(payload)["peers"]
+
+    assert peers["TE0"] == [["UT1", 0.81], ["TE1", 0.62]]
+    assert "TE1" not in peers                         # empty lists are dead weight
+
+
+def test_a_payload_with_no_peers_still_builds():
+    """Older payloads predate the correlation pass; the app must not care."""
+    payload = _payload()
+    payload.pop("peers", None)
+
+    assert sector_snack.build_data(payload)["peers"] == {}
 
 
 def test_feed_carries_a_parseable_date_for_the_staleness_check():

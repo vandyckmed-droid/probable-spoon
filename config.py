@@ -108,6 +108,8 @@ SECTOR_FEED_TIMEOUT_MS      = 6000       # then fall back to the baked snapshot
 SECTOR_FEED_FILE            = "out/sector_feed.json"    # build output; the published copy
 SECTOR_FEED_BRANCH_FILE     = "sector_feed.json"        # ...lives on the feed branch alone
 SECTOR_STALE_AFTER_DAYS     = 5         # beyond this the app says how old the numbers are
+PEER_COUNT                  = 8         # "moves like this" names kept per ticker
+PEER_MIN_CORRELATION        = 0.35      # below this they are not really related
 
 # Universe / market
 MARKET_TICKER = "VTI"

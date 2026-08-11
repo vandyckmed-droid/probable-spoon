@@ -3,17 +3,25 @@
 Which corners of the US stock market are climbing, and which companies inside
 them are doing the climbing.
 
-**The app: https://snack.expo.dev/pwdk0qRpvr3Y5KnxIxKeq**
+**The app: https://snack.expo.dev/O7TBnfa3jgztJILm_HJZb**
 
 Open that on a phone with [Expo Go](https://expo.dev/go) installed, or scan the
 QR code on the page. There is nothing to install and no account to make.
 
 It shows eleven sectors ranked best to worst, each with its 25 biggest,
-most-traded companies laid out as a shaded grid — green for the ones leading
-their own sector, red for the ones lagging it. Tap any square for the company
-behind the ticker. Every screen carries the date the prices were taken, and
-says so plainly when it is showing saved numbers or numbers nobody has
-refreshed lately.
+most-traded companies laid out as a grid. Every sector has its own colour, and
+the brighter a square burns, the stronger that company is against the others in
+its own sector.
+
+Tap any square and it lights up everything across the whole screen that moves
+with it, dimming the rest — the airlines light the cruise lines, the chipmakers
+light the power companies feeding the data centres. Those groupings are
+measured, not assigned: they come from how the share prices actually moved
+together, so they cut across the sector lines wherever the real relationships
+do.
+
+Every screen carries the date the prices were taken, and says plainly when it
+is showing saved numbers, or numbers nobody has refreshed lately.
 
 ## What the score means
 
@@ -56,7 +64,7 @@ needs nothing.
 export API_KEY=...
 python3 sector_index.py --benchmark    # rebuild and rank
 python3 sector_snack.py --push-feed    # publish the numbers to the app
-python3 -m pytest -q                   # 43 tests, no network
+python3 -m pytest -q                   # 50 tests, no network
 ```
 
 The app reads its numbers from the [`feed`](../../tree/feed) branch at run

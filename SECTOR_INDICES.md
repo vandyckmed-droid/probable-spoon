@@ -28,7 +28,7 @@ them from git history if that ever changes.
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/pwdk0qRpvr3Y5KnxIxKeq** — open it in Expo
+**Live link: https://snack.expo.dev/O7TBnfa3jgztJILm_HJZb** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -57,6 +57,37 @@ An earlier build hid the names behind a per-sector expand, which cost roughly
 925pt of scroll to read one sector's 25 names against about 84pt now. It reads
 the phone's colour scheme and uses pure React Native primitives — no
 dependencies for Expo Go to resolve.
+
+### Colour, brightness and family
+
+Colour identifies the sector — eleven neon hues spaced around the wheel and
+chosen to fit what the sector is (circuit cyan for Technology, flame for
+Energy, gold for Financial Services, an electric yellow-green zap for
+Utilities). Because hue is spent on identity, brightness carries the score:
+a cell is its sector's hue mixed toward the page ground by `lift(z)`, which
+saturates at the same +/-1.5 sigma the old red-green ramp did. In dark mode
+each cell also casts a shadow in its own hue, radius and opacity scaled by the
+same number, so the leaders glow and the laggards sink into the background. On
+a light ground the glow only muddies the cell, so it is dropped and the hue
+becomes a plain tint.
+
+Tapping a cell selects it and its family: `payload["peers"]`, the
+`PEER_COUNT` names whose daily log returns correlate highest with it over the
+scoring window, above `PEER_MIN_CORRELATION`. Everything else on screen drops
+to 11% opacity. The peer search is deliberately *not* restricted to a name's
+own sector — DAL surfaces UAL and AAL, then the cruise lines and the consumer
+lenders; NVDA surfaces the semis, then Vertiv and Oklo, which are Industrials
+and Utilities. A name whose closest relatives are three sectors away is the
+signal, not noise to be filtered out. Nine names, including AAPL, correlate
+with nothing above the floor and simply report that.
+
+Haptics are a selection tick on tap, an impact on pull-to-refresh and a
+success notification when new numbers land. Every call goes through `buzz()`,
+which swallows anything thrown: a simulator or a phone with the feature off
+must lose the buzz, not the screen. `expo-haptics` ships inside Expo Go, so it
+is declared in the Snack manifest and needs no build step — it is the only
+dependency, and a test asserts that every import is either built in or
+declared.
 
 ### Why the numbers are fetched, not baked
 

@@ -24,6 +24,8 @@ import config
 
 SNACK_SAVE_URL = "https://exp.host/--/api/v2/snack/save"
 SNACK_SDK_VERSION = "57.0.0"
+# Ships inside Expo Go, so Snack resolves it without a build step.
+SNACK_DEPENDENCIES = {"expo-haptics": "*"}
 
 SHORT_NAMES = {
     "Communication Services": "Communication",
@@ -47,12 +49,37 @@ SECTOR_GLOSS = {
     "Financial Services": "banks, insurers, payments",
 }
 
+# One neon hue per sector, spaced around the wheel so eleven stay tellable
+# apart, and picked to fit what the sector is: circuit cyan for Technology,
+# flame for Energy, gold for money, a zap of yellow-green for the power grid.
+SECTOR_HUE = {
+    "Technology": "#1fe0ff",             # circuit cyan
+    "Healthcare": "#2bf5a8",             # clinical spring green
+    "Consumer Defensive": "#7bf03a",     # grocery lime
+    "Utilities": "#d8f52a",              # electric yellow-green
+    "Financial Services": "#ffd21e",     # gold
+    "Industrials": "#ff8c1a",            # machine amber
+    "Energy": "#ff5a2b",                 # flame
+    "Basic Materials": "#ff4d7d",        # molten metal
+    "Consumer Cyclical": "#ff3ecb",      # shopfront magenta
+    "Communication Services": "#9b5cff", # broadcast violet
+    "Real Estate": "#3d8bff",            # blueprint blue
+}
+
 APP_TEMPLATE = r"""
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   SafeAreaView, ScrollView, View, Text, Pressable, useColorScheme,
   StatusBar, Platform, RefreshControl, useWindowDimensions,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
+
+// Haptics are decoration: a simulator, a web preview or a phone with the
+// feature switched off must not take the screen down with it.
+const buzz = (fn) => { try { fn(); } catch (e) {} };
+const tapped = () => buzz(() => Haptics.selectionAsync());
+const pulled = () => buzz(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
+const landed = () => buzz(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
 
 // The numbers baked in when this bundle was published — the offline fallback,
 // and the whole story when no feed is configured.
@@ -80,15 +107,24 @@ const DARK = {
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
 
-function shade(z) {
-  if (z === null || z === undefined) return 'na';
-  if (z < -1.5) return 'n3';
-  if (z < -0.75) return 'n2';
-  if (z < -0.25) return 'n1';
-  if (z < 0.25) return 'z0';
-  if (z < 0.75) return 'p1';
-  if (z < 1.5) return 'p2';
-  return 'p3';
+/** Blend two hex colours. t=0 keeps `from`, t=1 lands on `to`. */
+function mix(from, to, t) {
+  const parts = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const a = parts(from);
+  const b = parts(to);
+  return '#' + a
+    .map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Where a name sits in its sector, 0 (weakest) to 1 (strongest). Colour now
+ * says *which sector*, so brightness has to carry the score on its own — the
+ * scale saturates at the same +/-1.5 sigma the old red-green ramp did.
+ */
+function lift(z) {
+  if (z === null || z === undefined) return 0;
+  return Math.max(0, Math.min(1, (z + 1.5) / 3));
 }
 
 const pct = (x) => (x === null || x === undefined ? '—' : Math.round(x * 100) + '%');
@@ -100,21 +136,47 @@ function ordinal(n) {
   return n + (tail[(v - 20) % 10] || tail[v] || tail[0]);
 }
 
-/** One ticker, shaded on its within-sector z. The whole screen is these. */
-function Cell({ c, t, w, picked, onPress }) {
+/**
+ * One ticker, lit in its sector's hue at a brightness set by its score. When
+ * a name is selected, everything unrelated to it drops away to near-nothing —
+ * the point is to see the family, so the rest has to stop competing.
+ */
+function Cell({ c, t, w, hue, dark, state, onPress }) {
+  const heat = lift(c.z);
+  const bg = dark
+    ? mix(t.ground, hue, 0.07 + 0.88 * heat)
+    : mix('#ffffff', hue, 0.14 + 0.72 * heat);
+  const ink = dark ? (heat > 0.5 ? '#04100d' : '#c2cfcb') : '#14201d';
+
+  // Glow is a dark-mode affair; on a light ground it just muddies the cell.
+  const glow = dark
+    ? {
+        shadowColor: hue,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.25 + 0.6 * heat,
+        shadowRadius: 1 + 7 * heat,
+        elevation: Math.round(1 + 5 * heat),
+      }
+    : null;
+
   return (
-    <Pressable onPress={onPress} style={{ width: w, padding: 1 }}>
+    <Pressable
+      onPress={onPress}
+      style={{ width: w, padding: 1, opacity: state === 'muted' ? 0.11 : 1 }}
+    >
       <View
         style={{
-          backgroundColor: t[shade(c.z)],
+          backgroundColor: bg,
           borderRadius: 2,
           paddingVertical: 3,
           alignItems: 'center',
           borderWidth: 1,
-          borderColor: picked ? t.ink : 'transparent',
+          borderColor:
+            state === 'chosen' ? t.ink : state === 'kin' ? hue : 'transparent',
+          ...(glow || {}),
         }}
       >
-        <Text numberOfLines={1} style={{ color: t.ink, fontFamily: MONO, fontSize: 9.5 }}>
+        <Text numberOfLines={1} style={{ color: ink, fontFamily: MONO, fontSize: 9.5 }}>
           {c.ticker}
         </Text>
       </View>
@@ -122,44 +184,58 @@ function Cell({ c, t, w, picked, onPress }) {
   );
 }
 
-/** Tapping a cell trades one line of height for the name behind the ticker. */
-function Readout({ p, t }) {
+/**
+ * What the selected name is, and how much of its family lives outside its own
+ * sector — the number that makes the cross-sector highlighting worth having.
+ */
+function Readout({ p, t, hue }) {
   const tone = p.score === null ? t.muted : p.score < 0 ? t.neg : t.pos;
+  const away = p.kin.filter((k) => k.sector !== p.sector).length;
+  const family = p.kin.length
+    ? p.kin.length + ' move with it' + (away ? ', ' + away + ' outside this sector' : '')
+    : 'nothing else moves closely with it';
+
   return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'baseline',
-        marginTop: 6,
-        paddingTop: 6,
-        borderTopWidth: 1,
-        borderTopColor: t.ruleSoft,
-      }}
-    >
-      <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11 }}>{p.ticker}</Text>
-      <Text style={{ color: t.muted, fontSize: 11, flex: 1, marginLeft: 8 }} numberOfLines={1}>
-        {p.name}
-      </Text>
-      <Text style={{ color: t.faint, fontSize: 10, marginLeft: 6 }}>
-        {p.score === null ? 'unscored' : ordinal(p.place) + ' of ' + p.of}
-      </Text>
-      <Text style={{ color: tone, fontFamily: MONO, fontSize: 11, marginLeft: 8 }}>
-        {p.score === null ? '—' : signed(p.score)}
+    <View style={{ marginTop: 7, paddingTop: 7, borderTopWidth: 1, borderTopColor: t.ruleSoft }}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+        <Text style={{ color: hue, fontFamily: MONO, fontSize: 11 }}>{p.ticker}</Text>
+        <Text style={{ color: t.muted, fontSize: 11, flex: 1, marginLeft: 8 }} numberOfLines={1}>
+          {p.name}
+        </Text>
+        <Text style={{ color: t.faint, fontSize: 10, marginLeft: 6 }}>
+          {p.score === null ? 'unscored' : ordinal(p.place) + ' of ' + p.of}
+        </Text>
+        <Text style={{ color: tone, fontFamily: MONO, fontSize: 11, marginLeft: 8 }}>
+          {p.score === null ? '—' : signed(p.score)}
+        </Text>
+      </View>
+      <Text style={{ color: t.faint, fontSize: 10, marginTop: 3, lineHeight: 14 }} numberOfLines={2}>
+        {family}
+        {p.kin.length ? ' · ' + p.kin.map((k) => k.ticker).join(' ') : ''}
       </Text>
     </View>
   );
 }
 
-function SectorBlock({ s, t, cols, peak, pick, onPick }) {
+function SectorBlock({ s, t, dark, cols, peak, pick, onPick }) {
+  const hue = s.hue;
   const tone = s.score < 0 ? t.neg : t.pos;
   const w = 100 / cols + '%';
   const mine = pick && pick.sector === s.name ? pick : null;
+
+  const stateOf = (ticker) => {
+    if (!pick) return 'plain';
+    if (pick.sector === s.name && pick.ticker === ticker) return 'chosen';
+    return pick.kinSet[ticker] ? 'kin' : 'muted';
+  };
 
   return (
     <View style={{ marginBottom: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
         <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 11, width: 18 }}>{s.rank}</Text>
-        <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600', flex: 1 }}>{s.name}</Text>
+        <Text style={{ color: dark ? hue : t.ink, fontSize: 15, fontWeight: '600', flex: 1 }}>
+          {s.name}
+        </Text>
         <Text style={{ color: tone, fontFamily: MONO, fontSize: 15, fontWeight: '700' }}>
           {signed(s.score)}
         </Text>
@@ -175,7 +251,7 @@ function SectorBlock({ s, t, cols, peak, pick, onPick }) {
         <View
           style={{
             width: Math.min(Math.abs(s.score) / peak, 1) * 100 + '%',
-            backgroundColor: tone,
+            backgroundColor: dark ? hue : tone,
             borderRadius: 2,
           }}
         />
@@ -188,39 +264,41 @@ function SectorBlock({ s, t, cols, peak, pick, onPick }) {
             c={c}
             t={t}
             w={w}
-            picked={!!mine && mine.ticker === c.ticker}
-            onPress={() =>
-              onPick(
-                mine && mine.ticker === c.ticker
-                  ? null
-                  : { sector: s.name, ticker: c.ticker, name: c.name, score: c.score, place: i + 1, of: s.n }
-              )
-            }
+            hue={hue}
+            dark={dark}
+            state={stateOf(c.ticker)}
+            onPress={() => onPick(s, c, i)}
           />
         ))}
       </View>
 
-      {mine && <Readout p={mine} t={t} />}
+      {mine && <Readout p={mine} t={t} hue={hue} />}
     </View>
   );
 }
 
-
-function Legend({ t }) {
-  const keys = ['n3', 'n2', 'n1', 'z0', 'p1', 'p2', 'p3'];
+function Legend({ t, dark, hue }) {
+  const steps = [0, 0.25, 0.5, 0.75, 1];
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 7, flexWrap: 'wrap' }}>
       <Text style={{ color: t.faint, fontSize: 10, marginRight: 5 }}>weakest</Text>
-      {keys.map((k) => (
+      {steps.map((h) => (
         <View
-          key={k}
+          key={h}
           style={{
-            width: 18, height: 9, backgroundColor: t[k], borderRadius: 2,
-            borderWidth: 1, borderColor: t.rule, marginRight: 2,
+            width: 18,
+            height: 9,
+            borderRadius: 2,
+            marginRight: 2,
+            backgroundColor: dark
+              ? mix(t.ground, hue, 0.07 + 0.88 * h)
+              : mix('#ffffff', hue, 0.14 + 0.72 * h),
           }}
         />
       ))}
-      <Text style={{ color: t.faint, fontSize: 10, marginLeft: 3 }}>strongest in its own sector</Text>
+      <Text style={{ color: t.faint, fontSize: 10, marginLeft: 3 }}>
+        strongest in its own sector · each sector has its own colour
+      </Text>
     </View>
   );
 }
@@ -330,7 +408,7 @@ export default function App() {
 
   const load = useCallback((manual) => {
     if (!FEED.url) return;
-    if (manual) setBusy(true);
+    if (manual) { setBusy(true); pulled(); }
     else setState('checking');
 
     // No AbortController needed: a losing race just leaves the old numbers up.
@@ -347,12 +425,39 @@ export default function App() {
         if (!usable(fresh)) throw new Error('unusable feed');
         setData(fresh);
         setState('live');
+        setPick(null);          // the selection described the old numbers
+        if (manual) landed();
       })
       .catch(() => setState('stale'))
       .finally(() => setBusy(false));
   }, []);
 
   useEffect(() => { load(false); }, [load]);
+
+  // Which sector each ticker sits in, so the readout can count the family
+  // members that live outside the tapped name's own sector.
+  const homeOf = React.useMemo(() => {
+    const m = {};
+    data.sectors.forEach((s) => s.constituents.forEach((c) => { m[c.ticker] = s.name; }));
+    return m;
+  }, [data]);
+
+  const choose = useCallback((sector, c, i) => {
+    tapped();
+    setPick((prev) => {
+      if (prev && prev.sector === sector.name && prev.ticker === c.ticker) return null;
+      const kin = ((data.peers || {})[c.ticker] || []).map(([ticker, r]) => ({
+        ticker, r, sector: homeOf[ticker],
+      }));
+      // A lookup rather than a list: every cell on screen asks this question.
+      const kinSet = {};
+      kin.forEach((k) => { kinSet[k.ticker] = true; });
+      return {
+        sector: sector.name, ticker: c.ticker, name: c.name, score: c.score,
+        place: i + 1, of: sector.n, kin, kinSet,
+      };
+    });
+  }, [data, homeOf]);
 
   const peak = Math.max(...data.sectors.map((s) => Math.abs(s.score)));
 
@@ -376,7 +481,7 @@ export default function App() {
         </Text>
 
         <Freshness state={state} asOf={data.meta.asOf} asOfISO={data.meta.asOfISO} t={t} />
-        <Legend t={t} />
+        <Legend t={t} dark={dark} hue={data.sectors[0].hue} />
 
         <View style={{ height: 14 }} />
 
@@ -387,10 +492,11 @@ export default function App() {
             key={s.name}
             s={s}
             t={t}
+            dark={dark}
             cols={cols}
             peak={peak}
             pick={pick}
-            onPick={setPick}
+            onPick={choose}
           />
         ))}
 
@@ -419,6 +525,7 @@ def build_data(payload: dict) -> dict:
         sectors.append({
             "name": SHORT_NAMES.get(s["sector"], s["sector"]),
             "gloss": SECTOR_GLOSS.get(s["sector"], ""),
+            "hue": SECTOR_HUE.get(s["sector"], "#7ad9c8"),
             "rank": s["rank"],
             "score": round(s["score"], 4),
             "ret": round(s["ann_log_return"], 5),
@@ -494,8 +601,9 @@ def build_data(payload: dict) -> dict:
             "asOfISO": payload["as_of"],
             "blurb": (
                 f"{len(sectors)} corners of the US market, best first, by how steadily they "
-                f"climbed over nine months. Every square is one of the "
-                f"{config.SECTOR_INDEX_SIZE} companies in that sector — tap one for its name."
+                f"climbed over nine months. Each sector has its own colour; the brighter a "
+                f"square, the stronger that company is inside it. Tap one to light up "
+                f"everything that moves with it."
             ),
             "footer": (
                 "Prices from FMP, adjusted for splits and dividends. Information only — "
@@ -509,6 +617,13 @@ def build_data(payload: dict) -> dict:
             "details": details,
         },
         "sectors": sectors,
+        # [ticker, correlation] pairs, already sorted best first. Arrays rather
+        # than objects: 273 names x 8 peers, and the keys would be half the bytes.
+        "peers": {
+            ticker: [[peer["ticker"], peer["r"]] for peer in peers]
+            for ticker, peers in (payload.get("peers") or {}).items()
+            if peers
+        },
     }
 
 
@@ -571,10 +686,12 @@ def publish(source: str, *, name: str, description: str) -> dict:
             "sdkVersion": SNACK_SDK_VERSION,
             "name": name,
             "description": description,
-            "dependencies": {},
+            "dependencies": SNACK_DEPENDENCIES,
         },
         "code": {"App.js": {"contents": source, "type": "CODE"}},
-        "dependencies": {},
+        "dependencies": {
+            name: {"version": version} for name, version in SNACK_DEPENDENCIES.items()
+        },
     }
     req = urllib.request.Request(
         SNACK_SAVE_URL,

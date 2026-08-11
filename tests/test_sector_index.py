@@ -234,3 +234,62 @@ def test_scoring_survives_a_degenerate_member():
     assert by_ticker["FLAT"]["sector_rank"] is None
     assert by_ticker["A"]["sector_rank"] == 1
     assert scored[-1]["ticker"] == "FLAT"   # unscorable names sort last
+
+
+# ---------- correlated peers ----------
+
+def test_peers_find_the_names_that_move_together():
+    """Two pairs driven by their own shocks should each find their partner."""
+    n = 260
+    idx = pd.date_range("2023-01-02", periods=n, freq="B")
+    rng = np.random.default_rng(7)
+    twin_a, twin_b = rng.normal(0, 0.01, n), rng.normal(0, 0.01, n)
+
+    def levels(shock, noise):
+        r = shock + rng.normal(0, noise, n)
+        return 100 * np.exp(np.cumsum(r))
+
+    px = pd.DataFrame({
+        "AA": levels(twin_a, 0.002), "AB": levels(twin_a, 0.002),
+        "BA": levels(twin_b, 0.002), "BB": levels(twin_b, 0.002),
+    }, index=idx)
+
+    peers = sector_index.correlated_peers(px, list(px.columns))
+
+    assert peers["AA"][0]["ticker"] == "AB"
+    assert peers["BA"][0]["ticker"] == "BB"
+    assert peers["AA"][0]["r"] > 0.9
+    assert all(p["ticker"] != t for t, ps in peers.items() for p in ps)  # never itself
+
+
+def test_peers_drop_names_below_the_correlation_floor():
+    n = 260
+    idx = pd.date_range("2023-01-02", periods=n, freq="B")
+    rng = np.random.default_rng(11)
+    px = pd.DataFrame(
+        {t: 100 * np.exp(np.cumsum(rng.normal(0, 0.01, n))) for t in ("A", "B", "C")},
+        index=idx,
+    )
+
+    peers = sector_index.correlated_peers(px, ["A", "B", "C"])
+
+    # Independent walks: nothing should clear the floor.
+    assert all(p["r"] >= config.PEER_MIN_CORRELATION for ps in peers.values() for p in ps)
+    assert all(len(ps) <= config.PEER_COUNT for ps in peers.values())
+
+
+def test_a_flat_name_has_no_peers_and_breaks_nothing():
+    n = 260
+    idx = pd.date_range("2023-01-02", periods=n, freq="B")
+    rng = np.random.default_rng(3)
+    shock = rng.normal(0, 0.01, n)
+    px = pd.DataFrame({
+        "A": 100 * np.exp(np.cumsum(shock)),
+        "B": 100 * np.exp(np.cumsum(shock + rng.normal(0, 0.001, n))),
+        "FLAT": np.full(n, 50.0),
+    }, index=idx)
+
+    peers = sector_index.correlated_peers(px, ["A", "B", "FLAT"])
+
+    assert "FLAT" not in peers
+    assert peers["A"][0]["ticker"] == "B"
