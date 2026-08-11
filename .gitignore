@@ -4,3 +4,4 @@ cache/
 reports/
 snapshots/
 .pytest_cache/
+out/

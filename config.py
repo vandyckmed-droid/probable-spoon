@@ -77,6 +77,21 @@ MQV_STABLE        = False       # set True only when the model is frozen
 SNAPSHOTS_DIR     = "snapshots"
 SNAPSHOTS_INDEX_LIMIT = 20      # how many recent snapshots the report lists
 
+# Sector "ETFs": 25-name equal-weight sector indices, ranked on
+# volatility-adjusted 9-1 momentum (see sector_index.py).
+SECTOR_INDEX_SIZE           = 25        # constituents per synthetic sector ETF
+SECTOR_CANDIDATES_PER_SECTOR= 45        # screener shortlist before data-quality cuts
+SCREEN_MIN_MARKET_CAP       = 2_000_000_000
+SCREEN_MIN_VOLUME           = 300_000   # shares/day on the screener snapshot
+SCREEN_LIMIT                = 5000      # per-exchange screener page size
+LIQUIDITY_WINDOW_DAYS       = 63        # median dollar volume window (~3 months)
+MOM_9_1_LONG_DAYS           = 189       # 9 months of trading days (9 x 21)
+MOM_9_1_SKIP_DAYS           = 21        # skip the most recent month
+SECTOR_HISTORY_DAYS         = 500       # calendar days of price history to pull
+SECTOR_PRICES_CACHE         = "cache/sector_prices.pkl"
+SECTOR_PRICES_REFRESH_DAYS  = 1
+SECTOR_OUTPUT_DIR           = "out"
+
 # Universe / market
 MARKET_TICKER = "VTI"
 

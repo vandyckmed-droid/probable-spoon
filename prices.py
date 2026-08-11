@@ -62,7 +62,8 @@ def _parse_rows(rows: list) -> tuple[pd.Series, pd.Series]:
     )
 
 
-def _fetch_one(ticker: str, from_date: str) -> tuple[pd.Series, pd.Series]:
+def fetch_one(ticker: str, from_date: str) -> tuple[pd.Series, pd.Series]:
+    """Adjusted close + volume for one ticker from `from_date`. Empty on failure."""
     try:
         data = fmp_client.get(
             "historical-price-eod/full",
@@ -121,7 +122,7 @@ def fetch_prices(
         print(f"fetching prices for {total} ticker(s)...")
     for i, t in enumerate(to_fetch, 1):
         print(f"  [{i}/{total}] {t}")
-        p, v = _fetch_one(t, from_date)
+        p, v = fetch_one(t, from_date)
         if not p.empty:
             new_p[t] = p
         if not v.empty:
