@@ -7,7 +7,9 @@ FMP_API_KEY = ""
 
 import os
 if not FMP_API_KEY:
-    FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+    # API_KEY is what the hosted environment injects; FMP_API_KEY is the name a
+    # local shell is likely to use. Take either, preferring the explicit one.
+    FMP_API_KEY = os.environ.get("FMP_API_KEY") or os.environ.get("API_KEY", "")
 
 
 # Pipeline

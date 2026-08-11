@@ -5,7 +5,7 @@ sector's 25 most liquid US-listed stocks, then ranks the sectors on
 volatility-adjusted 9-1 log return.
 
 ```bash
-export FMP_API_KEY=...          # or paste it into config.py
+export FMP_API_KEY=...          # or API_KEY, or paste it into config.py
 python3 sector_index.py                # build + rank
 python3 sector_index.py --members      # also print each index's 25 names
 python3 sector_index.py --report       # also write out/sector_report.html
@@ -28,7 +28,7 @@ refresh daily.
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/K383vbcdH3cBfF2RxtZbe** — open it in Expo
+**Live link: https://snack.expo.dev/ujPb3oZlUrXlS8anTZ0ek** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -38,11 +38,17 @@ python3 sector_snack.py --publish  # ...and upload, printing the links
 python3 sector_snack.py --feed-url ''   # build a bundle that never phones home
 ```
 
-The 11 x 25 heatmap does not survive a phone screen, so the phone build
-inverts it: a tappable list of sectors, each opening into its own 25 names as
-rows — ticker, company name, score — with a colour bar on the same
-within-sector z. It reads the phone's colour scheme, and uses pure React
-Native primitives — no dependencies for Expo Go to resolve.
+The 11 x 25 heatmap is kept rather than inverted. Each sector is a compact
+header — rank, name, score, then one line of gloss and stats — above a grid of
+its 25 tickers, wrapped to as many columns as the screen affords (5 to 8, off
+`useWindowDimensions`) and shaded on the same within-sector z. All 275 names
+are therefore on one scroll with nothing behind a tap; tapping a cell spends a
+single line to name the company and give its place in the sector.
+
+An earlier build hid the names behind a per-sector expand, which cost roughly
+925pt of scroll to read one sector's 25 names against about 84pt now. It reads
+the phone's colour scheme and uses pure React Native primitives — no
+dependencies for Expo Go to resolve.
 
 ### Why the numbers are fetched, not baked
 
@@ -85,22 +91,23 @@ pull-to-refresh. If the feed ever 404s the app falls back to the snapshot baked
 in at publish time and says so on screen.
 
 The screen is written for a reader who does not know the vocabulary. Sectors
-carry a plain gloss ("chips, software, hardware") and a verdict word
-("Climbing steadily"); the columns read *Gain over the year*, *Typical swing*,
-*Names rising*, *Big-fund version*; and the maths — what the score is, which
-window, why the last month is skipped, the survivorship caveat — sits in a
-collapsed "How this works" panel rather than on the first screen. The exact
-window, observation count and as-of date stay in that panel as a mono stamp.
+carry a plain gloss ("chips, software, hardware"), and the stat line reads
+*46%/yr · swing 24% · 23/25 up* rather than annualised return, annualised vol
+and breadth. The maths — what the score is, which window, why the last month
+is skipped, the survivorship caveat — sits in a collapsed "How this works"
+panel rather than on the first screen, with the exact window, observation
+count and as-of date under it as a mono stamp.
 
 `tests/test_sector_snack.py` covers the payload → `App.js` step: every sector
 and name survives, unscorable names stay as nulls, the basket size is
 data-driven rather than a hardcoded 25, feed and baked snapshot are the same
 object, and the bundle imports nothing beyond `react` and `react-native`.
 
-The rendered bundle was also driven through a headless React renderer against
-four feeds — good, 404, junk JSON, and one that never responds — confirming it
-shows the sector list, opens exactly one name list at a time, goes live on a
-good feed, and falls back with the date visible on the other three.
+The rendered bundle is also driven through a headless React renderer against
+four feeds — good, 404, junk JSON, and one that never responds — asserting all
+275 cells render up front, that tapping one names the company and tapping it
+again closes it, that a good feed goes live, and that the other three fall
+back with the as-of date still on screen.
 
 ## Universe
 

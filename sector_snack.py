@@ -1,12 +1,13 @@
 """Emit the sector ranking as an Expo Snack app and publish it.
 
-The heatmap does not survive a phone screen as an 11 x 25 grid, so the phone
-build inverts it: a tappable list of sectors, each opening into its own 25
-names as rows shaded on the same within-sector z. Labels are written in plain
-words with the maths tucked behind a "How this works" panel, and the data is
-baked into the bundle, so the app needs no network once Expo Go has loaded it.
+The desktop 11 x 25 heatmap is kept, not inverted: each sector wraps its 25
+tickers into a grid sized to the screen, shaded on the same within-sector z,
+so all 275 names are on one scroll with nothing hidden behind a tap. Tapping a
+cell costs one line and returns the company name. Labels are plain words with
+the maths behind a "How this works" panel. The numbers are fetched at run time
+with the published snapshot as the offline fallback.
 
-    python3 sector_snack.py            # write out/App.js
+    python3 sector_snack.py            # write feed/sector_feed.json + out/App.js
     python3 sector_snack.py --publish  # ...and push it to snack.expo.dev
 """
 import argparse
@@ -46,7 +47,7 @@ APP_TEMPLATE = r"""
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   SafeAreaView, ScrollView, View, Text, Pressable, useColorScheme,
-  StatusBar, Platform, RefreshControl,
+  StatusBar, Platform, RefreshControl, useWindowDimensions,
 } from 'react-native';
 
 // The numbers baked in when this bundle was published — the offline fallback,
@@ -86,152 +87,136 @@ function shade(z) {
   return 'p3';
 }
 
-// Plain-word verdict for a sector's score, so the ranking reads without maths.
-function verdict(score) {
-  if (score >= 1.75) return 'Climbing hard';
-  if (score >= 1.0) return 'Climbing steadily';
-  if (score >= 0.4) return 'Drifting up';
-  if (score > -0.4) return 'Going nowhere';
-  if (score > -1.0) return 'Drifting down';
-  return 'Falling';
-}
-
 const pct = (x) => (x === null || x === undefined ? '—' : Math.round(x * 100) + '%');
 const signed = (x) => (x >= 0 ? '+' : '') + x.toFixed(2);
 
-function Bar({ score, peak, t }) {
-  const frac = Math.min(Math.abs(score) / peak, 1);
-  const up = score >= 0;
-  return (
-    <View style={{ flexDirection: 'row', height: 6, marginTop: 12 }}>
-      <View style={{ flex: 1, alignItems: 'flex-end' }}>
-        {!up && (
-          <View style={{ width: (frac * 100) + '%', height: 6, borderRadius: 1, backgroundColor: t.neg }} />
-        )}
-      </View>
-      <View style={{ width: 1, backgroundColor: t.rule }} />
-      <View style={{ flex: 1 }}>
-        {up && (
-          <View style={{ width: (frac * 100) + '%', height: 6, borderRadius: 1, backgroundColor: t.pos }} />
-        )}
-      </View>
-    </View>
-  );
+function ordinal(n) {
+  const tail = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (tail[(v - 20) % 10] || tail[v] || tail[0]);
 }
 
-function Stat({ label, value, t, tone }) {
+/** One ticker, shaded on its within-sector z. The whole screen is these. */
+function Cell({ c, t, w, picked, onPress }) {
   return (
-    <View style={{ flex: 1 }}>
-      <Text style={{ color: t.faint, fontSize: 10, lineHeight: 13 }}>{label}</Text>
-      <Text style={{ color: tone || t.ink, fontFamily: MONO, fontSize: 14, marginTop: 3 }}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function NameRow({ c, t, last }) {
-  const tone = c.score === null ? t.muted : c.score < 0 ? t.neg : t.pos;
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 7,
-        borderBottomWidth: last ? 0 : 1,
-        borderBottomColor: t.ruleSoft,
-      }}
-    >
-      <View style={{ width: 4, height: 22, borderRadius: 2, backgroundColor: t[shade(c.z)] }} />
-      <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 12, width: 58, marginLeft: 9 }}>
-        {c.ticker}
-      </Text>
-      <Text style={{ color: t.muted, fontSize: 12, flex: 1 }} numberOfLines={1}>
-        {c.name}
-      </Text>
-      <Text style={{ color: tone, fontFamily: MONO, fontSize: 12, marginLeft: 8 }}>
-        {c.score === null ? '—' : signed(c.score)}
-      </Text>
-    </View>
-  );
-}
-
-function SectorCard({ s, peak, t, open, onToggle }) {
-  const tone = s.score < 0 ? t.neg : t.pos;
-  return (
-    <Pressable
-      onPress={onToggle}
-      style={{
-        backgroundColor: t.surface,
-        borderColor: t.rule,
-        borderWidth: 1,
-        borderRadius: 8,
-        padding: 14,
-        marginBottom: 10,
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-        <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 12, width: 22 }}>{s.rank}</Text>
-        <Text style={{ color: t.ink, fontSize: 18, fontWeight: '600', flex: 1 }}>{s.name}</Text>
-        <Text style={{ color: tone, fontFamily: MONO, fontSize: 18, fontWeight: '700' }}>
-          {signed(s.score)}
+    <Pressable onPress={onPress} style={{ width: w, padding: 1 }}>
+      <View
+        style={{
+          backgroundColor: t[shade(c.z)],
+          borderRadius: 2,
+          paddingVertical: 3,
+          alignItems: 'center',
+          borderWidth: 1,
+          borderColor: picked ? t.ink : 'transparent',
+        }}
+      >
+        <Text numberOfLines={1} style={{ color: t.ink, fontFamily: MONO, fontSize: 9.5 }}>
+          {c.ticker}
         </Text>
       </View>
-
-      <View style={{ flexDirection: 'row', marginLeft: 22, marginTop: 3 }}>
-        <Text style={{ color: t.faint, fontSize: 12, flex: 1 }} numberOfLines={1}>
-          {s.gloss}
-        </Text>
-        <Text style={{ color: tone, fontSize: 12, marginLeft: 8 }}>{verdict(s.score)}</Text>
-      </View>
-
-      <Bar score={s.score} peak={peak} t={t} />
-
-      <View style={{ flexDirection: 'row', marginTop: 14, gap: 8 }}>
-        <Stat label={'Gain over' + '\n' + 'the year'} value={pct(s.ret)} t={t} tone={s.ret < 0 ? t.neg : t.ink} />
-        <Stat label={'Typical' + '\n' + 'swing'} value={pct(s.vol)} t={t} />
-        <Stat label={'Names' + '\n' + 'rising'} value={s.rising + ' of ' + s.n} t={t} />
-        <Stat
-          label={'Big-fund' + '\n' + 'version'}
-          value={s.etfScore === null ? '—' : signed(s.etfScore) + ' ' + s.etf}
-          t={t}
-        />
-      </View>
-
-      {open && (
-        <View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: t.ruleSoft, paddingTop: 10 }}>
-          <Text style={{ color: t.faint, fontSize: 11, marginBottom: 6, lineHeight: 16 }}>
-            All {s.n} companies, strongest first. The colour bar compares a company with the
-            others in its own sector — never across sectors.
-          </Text>
-          {s.constituents.map((c, i) => (
-            <NameRow key={c.ticker} c={c} t={t} last={i === s.constituents.length - 1} />
-          ))}
-        </View>
-      )}
-
-      <Text style={{ color: t.faint, fontSize: 11, marginTop: 10 }}>
-        {open ? 'Tap to close' : 'Tap to see all 25 companies'}
-      </Text>
     </Pressable>
   );
 }
 
+/** Tapping a cell trades one line of height for the name behind the ticker. */
+function Readout({ p, t }) {
+  const tone = p.score === null ? t.muted : p.score < 0 ? t.neg : t.pos;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'baseline',
+        marginTop: 6,
+        paddingTop: 6,
+        borderTopWidth: 1,
+        borderTopColor: t.ruleSoft,
+      }}
+    >
+      <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11 }}>{p.ticker}</Text>
+      <Text style={{ color: t.muted, fontSize: 11, flex: 1, marginLeft: 8 }} numberOfLines={1}>
+        {p.name}
+      </Text>
+      <Text style={{ color: t.faint, fontSize: 10, marginLeft: 6 }}>
+        {p.score === null ? 'unscored' : ordinal(p.place) + ' of ' + p.of}
+      </Text>
+      <Text style={{ color: tone, fontFamily: MONO, fontSize: 11, marginLeft: 8 }}>
+        {p.score === null ? '—' : signed(p.score)}
+      </Text>
+    </View>
+  );
+}
+
+function SectorBlock({ s, t, cols, peak, pick, onPick }) {
+  const tone = s.score < 0 ? t.neg : t.pos;
+  const w = 100 / cols + '%';
+  const mine = pick && pick.sector === s.name ? pick : null;
+
+  return (
+    <View style={{ marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+        <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 11, width: 18 }}>{s.rank}</Text>
+        <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600', flex: 1 }}>{s.name}</Text>
+        <Text style={{ color: tone, fontFamily: MONO, fontSize: 15, fontWeight: '700' }}>
+          {signed(s.score)}
+        </Text>
+      </View>
+
+      <Text numberOfLines={1} style={{ color: t.faint, fontSize: 10, marginLeft: 18, marginTop: 1 }}>
+        {s.gloss} · {pct(s.ret)}/yr · swing {pct(s.vol)} · {s.rising}/{s.n} up
+        {s.etf ? ' · ' + s.etf + ' ' + signed(s.etfScore) : ''}
+      </Text>
+
+      {/* Length is the score's size, colour its direction — ranking at a glance. */}
+      <View style={{ height: 3, marginTop: 5, marginLeft: 18, flexDirection: 'row' }}>
+        <View
+          style={{
+            width: Math.min(Math.abs(s.score) / peak, 1) * 100 + '%',
+            backgroundColor: tone,
+            borderRadius: 2,
+          }}
+        />
+      </View>
+
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 }}>
+        {s.constituents.map((c, i) => (
+          <Cell
+            key={c.ticker}
+            c={c}
+            t={t}
+            w={w}
+            picked={!!mine && mine.ticker === c.ticker}
+            onPress={() =>
+              onPick(
+                mine && mine.ticker === c.ticker
+                  ? null
+                  : { sector: s.name, ticker: c.ticker, name: c.name, score: c.score, place: i + 1, of: s.n }
+              )
+            }
+          />
+        ))}
+      </View>
+
+      {mine && <Readout p={mine} t={t} />}
+    </View>
+  );
+}
+
+
 function Legend({ t }) {
   const keys = ['n3', 'n2', 'n1', 'z0', 'p1', 'p2', 'p3'];
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-      <Text style={{ color: t.faint, fontSize: 10, marginRight: 6 }}>weakest</Text>
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 7, flexWrap: 'wrap' }}>
+      <Text style={{ color: t.faint, fontSize: 10, marginRight: 5 }}>weakest</Text>
       {keys.map((k) => (
         <View
           key={k}
           style={{
-            width: 20, height: 10, backgroundColor: t[k], borderRadius: 2,
+            width: 18, height: 9, backgroundColor: t[k], borderRadius: 2,
             borderWidth: 1, borderColor: t.rule, marginRight: 2,
           }}
         />
       ))}
-      <Text style={{ color: t.faint, fontSize: 10, marginLeft: 4 }}>strongest in its sector</Text>
+      <Text style={{ color: t.faint, fontSize: 10, marginLeft: 3 }}>strongest in its own sector</Text>
     </View>
   );
 }
@@ -265,9 +250,10 @@ function Details({ t, open, onToggle, meta }) {
         backgroundColor: t.surface,
         borderColor: t.rule,
         borderWidth: 1,
-        borderRadius: 8,
-        padding: 14,
-        marginBottom: 18,
+        borderRadius: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+        marginBottom: 16,
       }}
     >
       <Pressable onPress={onToggle}>
@@ -306,8 +292,11 @@ function usable(d) {
 export default function App() {
   const dark = useColorScheme() === 'dark';
   const t = dark ? DARK : LIGHT;
-  const [open, setOpen] = useState(null);
+  const [pick, setPick] = useState(null);
   const [how, setHow] = useState(false);
+  // Cells stay legible rather than stretching: more room means more columns.
+  const { width } = useWindowDimensions();
+  const cols = width >= 430 ? 8 : width >= 380 ? 7 : width >= 340 ? 6 : 5;
   const [data, setData] = useState(BAKED);
   const [state, setState] = useState(FEED.url ? 'checking' : 'baked');
   const [busy, setBusy] = useState(false);
@@ -352,32 +341,29 @@ export default function App() {
           ) : undefined
         }
       >
-        <Text style={{ color: t.faint, fontSize: 11, letterSpacing: 1.2, textTransform: 'uppercase' }}>
-          US shares
+        <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', lineHeight: 25 }}>
+          Which sectors are climbing?
         </Text>
-        <Text style={{ color: t.ink, fontSize: 28, fontWeight: '700', marginTop: 6, lineHeight: 33 }}>
-          Which corners of the{'\n'}market are climbing?
-        </Text>
-        <Text style={{ color: t.muted, fontSize: 14, marginTop: 12, lineHeight: 21 }}>
+        <Text style={{ color: t.muted, fontSize: 12, marginTop: 5, lineHeight: 17 }}>
           {data.meta.blurb}
         </Text>
 
         <Freshness state={state} asOf={data.meta.asOf} t={t} />
-
         <Legend t={t} />
 
-        <View style={{ height: 18 }} />
+        <View style={{ height: 14 }} />
 
         <Details t={t} open={how} onToggle={() => setHow(!how)} meta={data.meta} />
 
         {data.sectors.map((s) => (
-          <SectorCard
+          <SectorBlock
             key={s.name}
             s={s}
-            peak={peak}
             t={t}
-            open={open === s.name}
-            onToggle={() => setOpen(open === s.name ? null : s.name)}
+            cols={cols}
+            peak={peak}
+            pick={pick}
+            onPick={setPick}
           />
         ))}
 
@@ -479,9 +465,9 @@ def build_data(payload: dict) -> dict:
         "meta": {
             "asOf": pretty_date(payload["as_of"]),
             "blurb": (
-                f"Eleven corners of the US stock market, ranked by how steadily they have "
-                f"climbed over the past nine months. Tap any one to see the "
-                f"{config.SECTOR_INDEX_SIZE} companies inside it."
+                f"{len(sectors)} corners of the US market, best first, by how steadily they "
+                f"climbed over nine months. Every square is one of the "
+                f"{config.SECTOR_INDEX_SIZE} companies in that sector — tap one for its name."
             ),
             "footer": (
                 "Prices from FMP, adjusted for splits and dividends. Information only — "
