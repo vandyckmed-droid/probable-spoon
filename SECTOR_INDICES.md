@@ -28,7 +28,7 @@ refresh daily.
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/c1_6AchNu_NhrhsJOUdDx** — open it in Expo
+**Live link: https://snack.expo.dev/K383vbcdH3cBfF2RxtZbe** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -66,10 +66,23 @@ a phone on the feed and a phone offline render the same screen. It is tracked
 rather than written to `out/` because it is the artifact that gets published —
 and its history is what a "what moved this week" view would read.
 
-Publishing it is a copy into any public URL; `SECTOR_FEED_URL` currently points
-at `raw.githubusercontent.com/vandyckmed-droid/sector-feed/main/`, which serves
-`access-control-allow-origin: *` and a 5-minute cache. Until that file exists
-the app runs on the baked snapshot and says so.
+It is published on the **`feed` branch** — an orphan branch carrying only
+`sector_feed.json` and a README, no code and no shared history with the code
+branches, so a data refresh is a one-file commit that cannot touch them and
+cannot be stranded by a merge or a branch deletion. `raw.githubusercontent.com`
+serves it with `access-control-allow-origin: *` and a 5-minute cache, so the
+Snack web preview can read it too.
+
+```bash
+python3 sector_snack.py                        # refresh feed/sector_feed.json
+git fetch origin feed && git worktree add /tmp/feed feed
+cp feed/sector_feed.json /tmp/feed/sector_feed.json
+git -C /tmp/feed commit -am "Refresh the feed" && git -C /tmp/feed push
+```
+
+Nothing needs republishing after that — phones pick it up on next open or on
+pull-to-refresh. If the feed ever 404s the app falls back to the snapshot baked
+in at publish time and says so on screen.
 
 The screen is written for a reader who does not know the vocabulary. Sectors
 carry a plain gloss ("chips, software, hardware") and a verdict word

@@ -99,8 +99,9 @@ SECTOR_OUTPUT_DIR           = "out"
 # the snapshot baked in at build time.
 SECTOR_FEED_URL             = (
     "https://raw.githubusercontent.com/"
-    "vandyckmed-droid/sector-feed/main/sector_feed.json"
+    "vandyckmed-droid/probable-spoon/feed/sector_feed.json"
 )
+SECTOR_FEED_BRANCH          = "feed"     # data-only orphan branch; no code, no shared history
 SECTOR_FEED_TIMEOUT_MS      = 6000       # then fall back to the baked snapshot
 SECTOR_FEED_FILE            = "feed/sector_feed.json"   # tracked: this is what gets published
 
