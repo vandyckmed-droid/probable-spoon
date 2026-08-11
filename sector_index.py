@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import analytics
 import config
 import prices as prices_mod
 import screener
@@ -255,6 +256,41 @@ def vol_adjusted_9_1(levels: pd.Series) -> dict | None:
     }
 
 
+def score_constituents(closes: pd.DataFrame, members: list[dict]) -> list[dict]:
+    """Score each member on its own price series, then rank it inside its sector.
+
+    A single stock's adjusted-close series is a level series, so the members
+    take the identical 9-1 treatment the index gets. The z-score is
+    sector-relative by construction — the peer group is the other 24 names —
+    so it reads as dispersion within the sector, not market-wide level.
+
+    Deliberately not winsorised: the repo's 5/95 clip protects cross-sectional
+    fits over a 500-name universe, but inside a 25-name bucket it collapses the
+    best two names onto one value and the worst two onto another. Consumers
+    that need outlier protection should clamp the display scale instead.
+    """
+    keep = ("score", "ann_log_return", "ann_vol", "log_return_9_1")
+    scored: list[dict] = []
+    for rec in members:
+        stats = vol_adjusted_9_1(closes[rec["ticker"]].dropna()) or {}
+        scored.append({**rec, **{k: stats.get(k) for k in keep}})
+
+    raw = pd.Series(
+        {r["ticker"]: r["score"] for r in scored if r["score"] is not None},
+        dtype=float,
+    )
+    if not raw.empty:
+        z = analytics.zscore(raw)
+        order = raw.rank(ascending=False, method="min").astype(int)
+        for rec in scored:
+            t = rec["ticker"]
+            rec["sector_z"] = float(z[t]) if t in z.index else None
+            rec["sector_rank"] = int(order[t]) if t in order.index else None
+
+    scored.sort(key=lambda r: (r["sector_rank"] is None, r["sector_rank"] or 0))
+    return scored
+
+
 # --------------------------------------------------------------- pipeline ----
 
 def build(*, force: bool = False, no_fetch: bool = False) -> dict:
@@ -283,6 +319,7 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
                 f"of {len(candidates)} candidate(s)"
             )
             continue
+        chosen = score_constituents(closes, chosen)
         members = [r["ticker"] for r in chosen]
         levels = equal_weight_index(closes[members])
         stats = vol_adjusted_9_1(levels)
@@ -296,6 +333,9 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
             "median_dollar_volume": float(
                 np.median([r["median_dollar_volume"] for r in chosen])
             ),
+            "breadth": sum(
+                1 for r in chosen if (r.get("score") or 0.0) > 0
+            ) / len(chosen),
             "constituents": [
                 {
                     "ticker": r["ticker"],
@@ -303,6 +343,11 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
                     "industry": r["industry"],
                     "market_cap": r["market_cap"],
                     "median_dollar_volume": r["median_dollar_volume"],
+                    "score": r.get("score"),
+                    "sector_z": r.get("sector_z"),
+                    "sector_rank": r.get("sector_rank"),
+                    "ann_log_return": r.get("ann_log_return"),
+                    "ann_vol": r.get("ann_vol"),
                 }
                 for r in chosen
             ],
@@ -364,7 +409,7 @@ def print_table(payload: dict) -> None:
     print()
 
 
-def benchmark(payload: dict) -> None:
+def benchmark(payload: dict) -> dict:
     """Score the listed SPDR sector ETF on the same window, as a sanity check.
 
     The synthetic indices are equal weight over the 25 most liquid names, the
@@ -377,6 +422,7 @@ def benchmark(payload: dict) -> None:
     print(f"{'sector':<24}{'ours':>7}{'etf':>7}{'  etf':<6}{'ret gap':>9}{'vol gap':>9}")
     print("-" * 62)
     ours, theirs = [], []
+    out: dict[str, dict] = {}
     for s in payload["sectors"]:
         etf = SPDR_SECTOR_ETFS.get(s["sector"])
         if not etf:
@@ -388,15 +434,20 @@ def benchmark(payload: dict) -> None:
             continue
         ours.append(s["score"])
         theirs.append(stats["score"])
+        out[s["sector"]] = {"etf": etf, **stats}
         print(
             f"{s['sector']:<24}{s['score']:>7.2f}{stats['score']:>7.2f}  {etf:<4}"
             f"{(s['ann_log_return'] - stats['ann_log_return'])*100:>8.1f}%"
             f"{(s['ann_vol'] - stats['ann_vol'])*100:>8.1f}%"
         )
+    result = {"etfs": out, "rank_correlation": None}
     if len(ours) > 2:
         rank = lambda v: np.argsort(np.argsort(v))  # noqa: E731
-        rho = float(np.corrcoef(rank(ours), rank(theirs))[0, 1])
-        print(f"\nrank correlation with the SPDR sector ETFs: {rho:.2f}")
+        result["rank_correlation"] = float(np.corrcoef(rank(ours), rank(theirs))[0, 1])
+        print(f"\nrank correlation with the SPDR sector ETFs: "
+              f"{result['rank_correlation']:.2f}")
+    payload["benchmark"] = result
+    return result
 
 
 def write_outputs(payload: dict) -> list[Path]:
@@ -431,14 +482,20 @@ def write_outputs(payload: dict) -> list[Path]:
     with open(members_path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow([
-            "sector", "rank", "ticker", "name", "industry",
+            "sector", "sector_rank", "ticker", "name", "industry",
+            "score", "sector_z", "ann_log_return", "ann_vol",
             "market_cap", "median_dollar_volume", "weight",
         ])
         for s in payload["sectors"]:
             weight = 1.0 / s["n_constituents"]
-            for i, c in enumerate(s["constituents"], 1):
+            for c in s["constituents"]:
                 w.writerow([
-                    s["sector"], i, c["ticker"], c["name"], c["industry"],
+                    s["sector"], c["sector_rank"], c["ticker"], c["name"],
+                    c["industry"],
+                    "" if c["score"] is None else f"{c['score']:.4f}",
+                    "" if c["sector_z"] is None else f"{c['sector_z']:.4f}",
+                    "" if c["ann_log_return"] is None else f"{c['ann_log_return']:.6f}",
+                    "" if c["ann_vol"] is None else f"{c['ann_vol']:.6f}",
                     f"{c['market_cap']:.0f}", f"{c['median_dollar_volume']:.0f}",
                     f"{weight:.4f}",
                 ])
@@ -451,6 +508,9 @@ def main() -> None:
     ap.add_argument("--force", action="store_true", help="refetch all prices")
     ap.add_argument("--no-fetch", action="store_true", help="cache only, no network")
     ap.add_argument("--members", action="store_true", help="print constituents")
+    ap.add_argument(
+        "--report", action="store_true", help="also write the HTML report"
+    )
     ap.add_argument(
         "--benchmark", action="store_true",
         help="score the SPDR sector ETFs on the same window as a cross-check",
@@ -469,7 +529,11 @@ def main() -> None:
     if args.benchmark:
         benchmark(payload)
         print()
-    for path in write_outputs(payload):
+    written = write_outputs(payload)
+    if args.report:
+        import sector_report
+        written.append(sector_report.write_report(payload))
+    for path in written:
         print(f"wrote {path}")
 
 

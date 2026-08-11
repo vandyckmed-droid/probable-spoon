@@ -8,6 +8,7 @@ volatility-adjusted 9-1 log return.
 export FMP_API_KEY=...          # or paste it into config.py
 python3 sector_index.py                # build + rank
 python3 sector_index.py --members      # also print each index's 25 names
+python3 sector_index.py --report       # also write out/sector_report.html
 python3 sector_index.py --benchmark    # score the SPDR sector ETFs alongside
 python3 sector_index.py --no-fetch     # rerun off the cache, no network
 python3 sector_index.py --force        # refetch every price series
@@ -15,7 +16,10 @@ python3 sector_index.py --force        # refetch every price series
 
 Writes to `out/`: `sector_etf_ranking.json` (full payload incl. constituents),
 `sector_etf_ranking.csv` (the ranking table), `sector_etf_constituents.csv`
-(members and their 4% weights). Prices cache to `cache/sector_prices.pkl` and
+(members with their per-name scores, sector z and 4% weights). `--report`
+adds `sector_report.html`, a standalone page with the ranking and the
+name-level heatmap (`sector_report.py`, also runnable on its own against an
+existing JSON payload). Prices cache to `cache/sector_prices.pkl` and
 refresh daily.
 
 ## Universe
@@ -55,6 +59,20 @@ score       = numerator / denominator
 Both legs are annualised and both are measured on that same 168-day window, so
 nothing about the skipped month or the last 9 months' tail leaks into one leg
 but not the other. The ratio is unitless and scale-invariant in index level.
+
+## Name-level scores
+
+Every constituent is scored with the identical 9-1 treatment applied to its own
+adjusted-close series, then ranked and z-scored *within its own sector* — the
+peer group is the other 24 names, so the z reads as dispersion inside the
+sector rather than a market-wide level. The z is deliberately not winsorised:
+the repo's 5/95 clip is built for a 500-name cross-section and inside a
+25-name bucket it collapses the top two names onto one value. Consumers clamp
+the display scale instead — the heatmap saturates at ±1.5σ.
+
+Each sector also reports `breadth`, the share of its 25 names with a positive
+score on their own. It separates a sector carried by a few names (Technology,
+72%) from one that moved together (Industrials and Energy, 92%).
 
 Tunable in `config.py`: `SECTOR_INDEX_SIZE`, `MOM_9_1_LONG_DAYS`,
 `MOM_9_1_SKIP_DAYS`, `LIQUIDITY_WINDOW_DAYS`, `SCREEN_MIN_MARKET_CAP`,

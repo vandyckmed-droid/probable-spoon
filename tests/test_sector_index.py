@@ -3,6 +3,7 @@ import math
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import config
 import sector_index
@@ -181,3 +182,55 @@ def test_trading_calendar_drops_phantom_dates():
     kept = sector_index.trading_calendar(px)
     assert phantom not in kept.index
     assert len(kept) == 40
+
+
+# ---------- per-name scoring ----------
+
+def _members(tickers):
+    return [{"ticker": t, "name": t, "industry": "x", "market_cap": 1e10,
+             "median_dollar_volume": 1e8} for t in tickers]
+
+
+def test_members_are_scored_and_ranked_within_sector():
+    n = 260
+    idx = pd.date_range("2023-01-02", periods=n, freq="B")
+    # Deliberately ordered drifts: C is the strongest, A the weakest.
+    px = pd.DataFrame({
+        t: _levels(n, drift).to_numpy()
+        for t, drift in (("A", 1e-4), ("B", 4e-4), ("C", 9e-4))
+    }, index=idx)
+
+    scored = sector_index.score_constituents(px, _members(["A", "B", "C"]))
+
+    assert [r["ticker"] for r in scored] == ["C", "B", "A"]   # sorted best first
+    assert [r["sector_rank"] for r in scored] == [1, 2, 3]
+    assert scored[0]["score"] > scored[-1]["score"]
+    assert scored[0]["sector_z"] > 0 > scored[-1]["sector_z"]
+    assert abs(sum(r["sector_z"] for r in scored)) < 1e-9   # z is peer-relative
+
+
+def test_member_scores_match_the_index_treatment():
+    """A one-name sector's member score is exactly its index score."""
+    n = 260
+    px = pd.DataFrame({"A": _levels(n, 5e-4)})
+    scored = sector_index.score_constituents(px, _members(["A"]))
+    index_stats = sector_index.vol_adjusted_9_1(sector_index.equal_weight_index(px))
+
+    # The index drops the first row, so allow the one-day framing difference.
+    assert scored[0]["score"] == pytest.approx(index_stats["score"], rel=0.02)
+
+
+def test_scoring_survives_a_degenerate_member():
+    n = 260
+    px = pd.DataFrame({
+        "A": _levels(n, 5e-4).to_numpy(),
+        "FLAT": np.full(n, 50.0),          # zero variance -> unscorable
+    }, index=pd.date_range("2023-01-02", periods=n, freq="B"))
+
+    scored = sector_index.score_constituents(px, _members(["A", "FLAT"]))
+    by_ticker = {r["ticker"]: r for r in scored}
+
+    assert by_ticker["FLAT"]["score"] is None
+    assert by_ticker["FLAT"]["sector_rank"] is None
+    assert by_ticker["A"]["sector_rank"] == 1
+    assert scored[-1]["ticker"] == "FLAT"   # unscorable names sort last

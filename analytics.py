@@ -110,7 +110,7 @@ def _winsorize(s: pd.Series, lower: float = WINSOR_LOWER, upper: float = WINSOR_
     return s.clip(lower=s.quantile(lower), upper=s.quantile(upper))
 
 
-def _zscore(s: pd.Series) -> pd.Series:
+def zscore(s: pd.Series) -> pd.Series:
     """(s - mean) / std (ddof=0). Zeros aligned to s.index when std is 0 or NaN."""
     mean = s.mean()
     std = s.std(ddof=0)
@@ -180,11 +180,11 @@ def compute_residual_momentum(
     df = pd.DataFrame.from_dict(rows, orient="index")
     if df.empty:
         return df
-    df["m12_z"] = _zscore(_winsorize(df["m12_raw"]))
-    df["m6_z"] = _zscore(_winsorize(df["m6_raw"]))
-    df["m1_z"] = _zscore(_winsorize(df["m1_raw"]))
+    df["m12_z"] = zscore(_winsorize(df["m12_raw"]))
+    df["m6_z"] = zscore(_winsorize(df["m6_raw"]))
+    df["m1_z"] = zscore(_winsorize(df["m1_raw"]))
     combined = MOM_W_12_1 * df["m12_z"] + MOM_W_6_1 * df["m6_z"]
-    df["residual_momentum_z"] = _zscore(_winsorize(combined))
+    df["residual_momentum_z"] = zscore(_winsorize(combined))
     return df[
         ["sector", "m12_raw", "m6_raw", "m1_raw",
          "m12_z", "m6_z", "m1_z", "residual_momentum_z"]
@@ -307,7 +307,7 @@ def _winsor_zscore_hierarchical(
             continue
         group = s.loc[idx].dropna()
         if len(group) >= primary_min:
-            z = _zscore(_winsorize(group))
+            z = zscore(_winsorize(group))
             out.loc[z.index] = z
             scope.loc[z.index] = "industry"
             assigned.loc[z.index] = True
@@ -321,7 +321,7 @@ def _winsor_zscore_hierarchical(
                 continue
             group = s.loc[idx].dropna()
             if len(group) >= secondary_min:
-                z = _zscore(_winsorize(group))
+                z = zscore(_winsorize(group))
                 out.loc[z.index] = z
                 scope.loc[z.index] = "sector"
                 assigned.loc[z.index] = True
@@ -331,7 +331,7 @@ def _winsor_zscore_hierarchical(
     # includes all observations, not just the leftover slice.
     pending = (~assigned) & s.notna()
     if pending.any():
-        universe_z = _zscore(_winsorize(s))
+        universe_z = zscore(_winsorize(s))
         out.loc[pending] = universe_z.loc[pending]
         scope.loc[pending] = "universe"
 
@@ -432,7 +432,7 @@ def compute_quality(
         + Q_GP_CHANGE_W * df["gp_change_z"].fillna(0)
         + Q_NETDEBT_W * df["nd_z"].fillna(0)
     )
-    df["quality_z"] = _zscore(_winsorize(df["quality_raw"]))
+    df["quality_z"] = zscore(_winsorize(df["quality_raw"]))
     coverage = df["quality_z"].notna().sum() / len(funds) if funds else 0.0
     cols = ["sector", "industry",
             "gross_profitability", "gp_change", "balance_sheet_quality",
@@ -513,7 +513,7 @@ def compute_value(
         + V_FCF_EV_W * df["fcf_ev_z"].fillna(0)
         + V_BP_W * df["book_mc_z"].fillna(0)
     )
-    df["value_z"] = _zscore(_winsorize(df["value_raw"]))
+    df["value_z"] = zscore(_winsorize(df["value_raw"]))
     coverage = df["value_z"].notna().sum() / len(funds) if funds else 0.0
     cols = ["sector", "industry", "market_cap",
             "ebit_ev", "fcf_ev", "book_mc",
@@ -604,7 +604,7 @@ def compute_expectations(
         EXP_GROWTH_W * df["growth_z"].fillna(0)
         + EXP_SURPRISE_W * df["surprise_z"].fillna(0)
     )
-    df["expectations_z"] = _zscore(_winsorize(df["expectations_raw"]))
+    df["expectations_z"] = zscore(_winsorize(df["expectations_raw"]))
     coverage = (
         df["expectations_z"].notna().sum() / len(revisions_data)
         if revisions_data else 0.0
