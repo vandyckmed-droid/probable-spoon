@@ -4,10 +4,18 @@ Ranks US equity sectors on volatility-adjusted 9-1 momentum and ships the
 result as a phone app. `SECTOR_INDICES.md` is the reference for the method,
 the data flow and the phone build — read it before changing any of them.
 
-**The phone app is the product.** The HTML report and the CSVs are by-products.
-When a change would improve one at the other's expense, the phone screen wins.
-Design for a phone first: dense, everything visible, minimal scroll, no
-information parked behind a tap that could have been shown outright.
+**The phone app is the product.** The CSVs are by-products. When a change
+would improve one at the other's expense, the phone screen wins. Design for a
+phone first: dense, everything visible, minimal scroll, no information parked
+behind a tap that could have been shown outright.
+
+**Design authority is yours.** The user has delegated UI/UX wholesale: keep it
+professional, effortless and quiet. One design system across every screen and
+both colour schemes; a neutral palette with a single muted diverging ramp for
+the data and one interactive accent; no glow, no shadows, no per-sector hues,
+no novelty type. Readability beats spectacle — check light mode explicitly,
+it is where decoration goes to die. Take function requests from the user;
+translate them into this system rather than styling to order.
 
 ## Standing autonomy
 

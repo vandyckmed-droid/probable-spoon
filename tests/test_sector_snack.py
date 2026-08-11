@@ -195,15 +195,13 @@ def test_feed_and_baked_snapshot_are_the_same_object():
     assert baked == sector_snack.build_data(payload)
 
 
-def test_every_sector_gets_its_own_colour():
-    data = sector_snack.build_data(_payload())
-    hues = [s["hue"] for s in data["sectors"]]
+def test_the_grid_reads_direction_and_magnitude():
+    """One diverging scale: direction picks the side, |z| the depth."""
+    src = sector_snack.render_app(_payload())
 
-    assert all(re.fullmatch(r"#[0-9a-f]{6}", h) for h in hues)
-    assert len(set(hues)) == len(hues)
-    # Every sector the pipeline can emit needs one, or it silently falls back.
-    assert set(sector_snack.SECTOR_HUE) == set(sector_snack.SECTOR_GLOSS)
-    assert len(set(sector_snack.SECTOR_HUE.values())) == len(sector_snack.SECTOR_HUE)
+    assert "const side = z < 0 ? t.neg : t.pos;" in src
+    assert "Math.min(Math.abs(z) / 1.5, 1)" in src           # saturates at ±1.5σ
+    assert "hue" not in json.dumps(sector_snack.build_data(_payload())["sectors"][0])
 
 
 def test_peers_ride_along_as_compact_pairs():
@@ -297,11 +295,10 @@ def test_the_app_hides_the_tab_bar_when_there_is_one_list():
     assert ".filter((tier) => tier.sectors.length)" in src
 
 
-def test_the_two_skins_differ_in_more_than_colour():
+def test_both_tiers_share_one_design_system():
+    """No per-tier skins, no glow — one calm idiom everywhere."""
     src = sector_snack.render_app(_payload())
-    top = re.search(r"top: \{(.*?)\n  \},", src, re.S).group(1)
-    nxt = re.search(r"next: \{(.*?)\n  \},", src, re.S).group(1)
 
-    assert "filled: true" in top and "glow: true" in top and "radius: 2" in top
-    assert "filled: false" in nxt and "glow: false" in nxt and "radius: 0" in nxt
-    assert "steel: 0.4" in nxt and "mono: true" in nxt
+    assert "SKINS" not in src
+    assert "shadowColor" not in src
+    assert "shadowRadius" not in src

@@ -52,7 +52,7 @@ them from git history if that ever changes.
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/XPWcdurzg01b7HhgmGa_b** — open it in Expo
+**Live link: https://snack.expo.dev/qhyPiJz5zGNkKZw6KiSW6** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -82,44 +82,43 @@ An earlier build hid the names behind a per-sector expand, which cost roughly
 the phone's colour scheme and uses pure React Native primitives — no
 dependencies for Expo Go to resolve.
 
-### Two lists, two visual languages
+### One design system
 
-The tiers get their own screens behind a tab bar, not more rows on one screen —
-550 cells on a single scroll is not a phone screen, it is a wall. Selection
-survives the switch on purpose: tap NVDA on the first list, move to the second,
-and its relatives there are still lit, with a banner naming whose family is on
-screen so the dimming does not read as a fault.
+The tiers get their own screens behind a segmented control, not more rows on
+one screen — 525 cells on a single scroll is a wall, not a phone screen — and
+both wear the same design. An earlier build gave each tier its own idiom (neon
+glow on one, blueprint outlines on the other) and per-sector hues; it
+photographed badly and read worse, light-mode outlines especially. The current
+system is deliberately quiet:
 
-`SKINS` in the bundle keys the visual language off the tier. Tier 1 is *lit*:
-filled cells, rounded corners, a hue-coloured glow scaled by score. Tier 2 is
-*drawn*: near-black cells with the heat in the border rather than the fill,
-square corners, no glow, sector headings in spaced uppercase mono. The hues are
-the same family in both — tier 2 pulls each one 40% toward gunmetal — so a
-sector stays recognisable across the switch while nothing else about the
-construction matches.
+- Neutral ground, white sector cards, one type scale, mono reserved for
+  numbers and tickers.
+- One muted diverging ramp carries the within-sector z: teal leading, rust
+  lagging, magnitude as depth, saturating at ±1.5σ. Tints are capped so the
+  theme ink is readable on every cell in both colour schemes — no per-cell
+  text-colour juggling, no glow, no shadows.
+- Selection dims unrelated names to 28% rather than blacking them out, so the
+  page still reads as a page with one family in focus; the chosen cell borders
+  in ink, its kin border in the single interactive accent.
 
-### Colour, brightness and family
+Sector identity comes from position and label, not hue. Direction is back in
+the grid — a square says at a glance whether the name is ahead of or behind
+its sector, which the hue-per-sector scheme had traded away.
 
-Colour identifies the sector — eleven neon hues spaced around the wheel and
-chosen to fit what the sector is (circuit cyan for Technology, flame for
-Energy, gold for Financial Services, an electric yellow-green zap for
-Utilities). Because hue is spent on identity, brightness carries the score:
-a cell is its sector's hue mixed toward the page ground by `lift(z)`, which
-saturates at the same +/-1.5 sigma the old red-green ramp did. In dark mode
-each cell also casts a shadow in its own hue, radius and opacity scaled by the
-same number, so the leaders glow and the laggards sink into the background. On
-a light ground the glow only muddies the cell, so it is dropped and the hue
-becomes a plain tint.
+Selection survives the tab switch on purpose: tap NVDA on the first list, move
+to the second, and its relatives there are still lit, with a banner naming
+whose family is on screen so the dimming does not read as a fault.
+
+### Family highlighting and haptics
 
 Tapping a cell selects it and its family: `payload["peers"]`, the
 `PEER_COUNT` names whose daily log returns correlate highest with it over the
-scoring window, above `PEER_MIN_CORRELATION`. Everything else on screen drops
-to 11% opacity. The peer search is deliberately *not* restricted to a name's
-own sector — DAL surfaces UAL and AAL, then the cruise lines and the consumer
-lenders; NVDA surfaces the semis, then Vertiv and Oklo, which are Industrials
-and Utilities. A name whose closest relatives are three sectors away is the
-signal, not noise to be filtered out. Nine names, including AAPL, correlate
-with nothing above the floor and simply report that.
+scoring window, above `PEER_MIN_CORRELATION`. The peer search deliberately
+spans every sector and both tiers — DAL surfaces UAL and AAL, then the cruise
+lines and the consumer lenders; NVDA surfaces the semis, then Vertiv out of
+Industrials and MPWR and IBKR down on the second list. A name whose closest
+relatives are three sectors away is the signal, not noise to be filtered out.
+Some names correlate with nothing above the floor and simply report that.
 
 Haptics are a selection tick on tap, an impact on pull-to-refresh and a
 success notification when new numbers land. Every call goes through `buzz()`,

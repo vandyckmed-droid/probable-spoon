@@ -3,27 +3,24 @@
 Which corners of the US stock market are climbing, and which companies inside
 them are doing the climbing.
 
-**The app: https://snack.expo.dev/XPWcdurzg01b7HhgmGa_b**
+**The app: https://snack.expo.dev/qhyPiJz5zGNkKZw6KiSW6**
 
 Open that on a phone with [Expo Go](https://expo.dev/go) installed, or scan the
 QR code on the page. There is nothing to install and no account to make.
 
 It shows eleven sectors ranked best to worst, each with its 25 biggest,
-most-traded companies laid out as a grid. Every sector has its own colour, and
-the brighter a square burns, the stronger that company is against the others in
-its own sector.
+most-traded companies laid out as a grid. Teal squares are leading their own
+sector, rust squares are lagging it, and the deeper the colour the stronger
+the signal. Tap any square to name the company and light up everything on
+either list that moves with it.
 
 There are two lists behind the tabs at the top. **Top 25** is those biggest
 names. **Next 25** is the 25 directly below them in each sector — same rules,
 one rung down the size ladder — and it is scored and ranked entirely on its
 own, so it answers a separate question: are the smaller companies going the
 same way as the giants? Often they are not. Right now the big banks are the
-worst sector on the first list and the smaller financials are the fourth best
-on the second.
-
-The two lists look deliberately different: the first is lit and glowing, the
-second is drawn in outline. Same sector colours in both, so you can still tell
-Energy from Technology at a glance.
+worst sector on the first list and the smaller financials are near the top of
+the second.
 
 Tap any square and it lights up everything across the whole screen that moves
 with it, dimming the rest — the airlines light the cruise lines, the chipmakers

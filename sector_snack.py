@@ -1,11 +1,12 @@
 """Emit the sector ranking as an Expo Snack app and publish it.
 
-The desktop 11 x 25 heatmap is kept, not inverted: each sector wraps its 25
-tickers into a grid sized to the screen, shaded on the same within-sector z,
-so all 275 names are on one scroll with nothing hidden behind a tap. Tapping a
-cell costs one line and returns the company name. Labels are plain words with
-the maths behind a "How this works" panel. The numbers are fetched at run time
-with the published snapshot as the offline fallback.
+Each tier renders as sector cards, each wrapping its 25 tickers into a grid
+sized to the screen and shaded on the same within-sector z — one restrained
+diverging scale (teal leading, rust lagging), one design system across both
+tiers and both colour schemes. Tapping a cell names the company and lights its
+correlation family; labels are plain words with the maths behind a "How this
+works" panel. The numbers are fetched at run time with the published snapshot
+as the offline fallback.
 
     python3 sector_snack.py              # write out/sector_feed.json + out/App.js
     python3 sector_snack.py --push-feed  # ...and publish the numbers (a refresh)
@@ -49,23 +50,6 @@ SECTOR_GLOSS = {
     "Financial Services": "banks, insurers, payments",
 }
 
-# One neon hue per sector, spaced around the wheel so eleven stay tellable
-# apart, and picked to fit what the sector is: circuit cyan for Technology,
-# flame for Energy, gold for money, a zap of yellow-green for the power grid.
-SECTOR_HUE = {
-    "Technology": "#1fe0ff",             # circuit cyan
-    "Healthcare": "#2bf5a8",             # clinical spring green
-    "Consumer Defensive": "#7bf03a",     # grocery lime
-    "Utilities": "#d8f52a",              # electric yellow-green
-    "Financial Services": "#ffd21e",     # gold
-    "Industrials": "#ff8c1a",            # machine amber
-    "Energy": "#ff5a2b",                 # flame
-    "Basic Materials": "#ff4d7d",        # molten metal
-    "Consumer Cyclical": "#ff3ecb",      # shopfront magenta
-    "Communication Services": "#9b5cff", # broadcast violet
-    "Real Estate": "#3d8bff",            # blueprint blue
-}
-
 APP_TEMPLATE = r"""
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -90,54 +74,24 @@ const BAKED = __DATA__;
 // republishing, so the link never moves.
 const FEED = __FEED__;
 
+/**
+ * One design system, both lists, both colour schemes. A muted diverging scale
+ * carries the one number that matters — teal for names leading their sector,
+ * rust for names lagging it — and everything else stays neutral so the data
+ * is the only thing with a voice.
+ */
 const LIGHT = {
-  ground: '#f6f7f6', surface: '#ffffff', ink: '#14201d', muted: '#5d6c68',
-  faint: '#8a9994', rule: '#dfe4e1', ruleSoft: '#ecefed',
-  pos: '#1d6b5f', neg: '#a64a32',
-  n3: '#c9765c', n2: '#ddA48d', n1: '#eecdbe', z0: '#dde3e0',
-  p1: '#bcdcd4', p2: '#8ec8ba', p3: '#4fa694', na: '#e4e8e6',
+  ground: '#f7f8fa', surface: '#ffffff', ink: '#1b2430', muted: '#5b6675',
+  faint: '#8b95a2', rule: '#e2e6eb', ruleSoft: '#eef1f4',
+  pos: '#1f7a68', neg: '#bf5b49', accent: '#3d6fd6',
 };
 const DARK = {
-  ground: '#0f1513', surface: '#161e1c', ink: '#e6ece9', muted: '#8fa09b',
-  faint: '#6d7d78', rule: '#26302e', ruleSoft: '#1d2624',
-  pos: '#58bfad', neg: '#d8735a',
-  n3: '#a4523b', n2: '#7b3d2c', n1: '#4a2c22', z0: '#2a3432',
-  p1: '#204740', p2: '#2b6a5c', p3: '#3f9482', na: '#1a201f',
+  ground: '#0f1318', surface: '#161b22', ink: '#e6ebf1', muted: '#98a2af',
+  faint: '#6b7480', rule: '#273039', ruleSoft: '#1d242c',
+  pos: '#46b39a', neg: '#d8836f', accent: '#6f9be8',
 };
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
-
-/**
- * The two lists get two visual languages, not two colour swaps. Tier 1 is
- * solid and lit: filled cells, rounded, glowing in the sector's own neon. Tier
- * 2 is drawn rather than lit — near-black cells outlined in a steel-shifted
- * version of the same hue, square corners, no glow, headings in spaced mono.
- * Same hue family in both so a sector stays recognisable across the switch;
- * everything else about the construction differs.
- */
-const SKINS = {
-  top: {
-    ground: { dark: '#0f1513', light: '#f6f7f6' },
-    steel: 0,
-    filled: true,
-    glow: true,
-    radius: 2,
-    heading: { fontSize: 15, fontWeight: '600', letterSpacing: 0 },
-    tab: 'Top 25',
-  },
-  next: {
-    ground: { dark: '#0b1016', light: '#f1f3f6' },
-    steel: 0.4,                 // hue pulled toward gunmetal
-    filled: false,
-    glow: false,
-    radius: 0,
-    heading: { fontSize: 13, fontWeight: '600', letterSpacing: 1.1, mono: true },
-    tab: 'Next 25',
-  },
-};
-const STEEL = '#8ea3b4';
-const skinFor = (key) => SKINS[key] || SKINS.top;
-const hueFor = (skin, hue) => (skin.steel ? mix(hue, STEEL, skin.steel) : hue);
 
 /** Blend two hex colours. t=0 keeps `from`, t=1 lands on `to`. */
 function mix(from, to, t) {
@@ -150,13 +104,16 @@ function mix(from, to, t) {
 }
 
 /**
- * Where a name sits in its sector, 0 (weakest) to 1 (strongest). Colour now
- * says *which sector*, so brightness has to carry the score on its own — the
- * scale saturates at the same +/-1.5 sigma the old red-green ramp did.
+ * Cell fill for a within-sector z. Direction picks the side of the scale,
+ * magnitude picks the depth, saturating at ±1.5σ. The tint is capped so the
+ * theme ink stays readable on every cell — no per-cell text colour juggling.
  */
-function lift(z) {
-  if (z === null || z === undefined) return 0;
-  return Math.max(0, Math.min(1, (z + 1.5) / 3));
+function cellFill(z, t, dark) {
+  if (z === null || z === undefined) return dark ? t.ruleSoft : t.ruleSoft;
+  const side = z < 0 ? t.neg : t.pos;
+  const m = Math.min(Math.abs(z) / 1.5, 1);
+  const base = dark ? t.surface : '#ffffff';
+  return mix(base, side, dark ? 0.1 + 0.52 * m : 0.07 + 0.38 * m);
 }
 
 const pct = (x) => (x === null || x === undefined ? '—' : Math.round(x * 100) + '%');
@@ -169,62 +126,27 @@ function ordinal(n) {
 }
 
 /**
- * One ticker. Tier 1 fills and glows; tier 2 draws an outline and leaves the
- * middle dark. Either way brightness is the score, colour is the sector, and a
- * name unrelated to the current selection drops away to near-nothing.
+ * One ticker. Selection dims the unrelated rather than blacking them out —
+ * the page should still read as a page, just with one family in focus.
  */
-function Cell({ c, t, w, hue, dark, skin, state, onPress }) {
-  const heat = lift(c.z);
-  const ground = dark ? skin.ground.dark : skin.ground.light;
-
-  let bg;
-  let ink;
-  let border;
-  if (skin.filled) {
-    bg = dark ? mix(ground, hue, 0.07 + 0.88 * heat) : mix('#ffffff', hue, 0.14 + 0.72 * heat);
-    ink = dark ? (heat > 0.5 ? '#04100d' : '#c2cfcb') : '#14201d';
-    border = state === 'chosen' ? t.ink : state === 'kin' ? hue : 'transparent';
-  } else {
-    // Outlined: the fill barely lifts off the ground, the edge carries the heat.
-    bg = dark ? mix(ground, hue, 0.03 + 0.17 * heat) : mix('#ffffff', hue, 0.05 + 0.2 * heat);
-    ink = dark ? mix('#5f7078', hue, 0.25 + 0.75 * heat) : mix('#5a6a72', hue, 0.3 * heat);
-    border =
-      state === 'chosen'
-        ? t.ink
-        : dark
-        ? mix(ground, hue, 0.2 + 0.8 * heat)
-        : mix('#ffffff', hue, 0.35 + 0.65 * heat);
-  }
-
-  // Glow is a tier-1, dark-mode affair; elsewhere it only muddies the cell.
-  const glow =
-    skin.glow && dark
-      ? {
-          shadowColor: hue,
-          shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.25 + 0.6 * heat,
-          shadowRadius: 1 + 7 * heat,
-          elevation: Math.round(1 + 5 * heat),
-        }
-      : null;
-
+function Cell({ c, t, w, dark, state, onPress }) {
   return (
     <Pressable
       onPress={onPress}
-      style={{ width: w, padding: 1, opacity: state === 'muted' ? 0.11 : 1 }}
+      style={{ width: w, padding: 1.5, opacity: state === 'muted' ? 0.28 : 1 }}
     >
       <View
         style={{
-          backgroundColor: bg,
-          borderRadius: skin.radius,
-          paddingVertical: 3,
+          backgroundColor: cellFill(c.z, t, dark),
+          borderRadius: 4,
+          paddingVertical: 4,
           alignItems: 'center',
           borderWidth: 1,
-          borderColor: border,
-          ...(glow || {}),
+          borderColor:
+            state === 'chosen' ? t.ink : state === 'kin' ? t.accent : 'transparent',
         }}
       >
-        <Text numberOfLines={1} style={{ color: ink, fontFamily: MONO, fontSize: 9.5 }}>
+        <Text numberOfLines={1} style={{ color: t.ink, fontFamily: MONO, fontSize: 10 }}>
           {c.ticker}
         </Text>
       </View>
@@ -236,7 +158,7 @@ function Cell({ c, t, w, hue, dark, skin, state, onPress }) {
  * What the selected name is, and how much of its family lives outside its own
  * sector — the number that makes the cross-sector highlighting worth having.
  */
-function Readout({ p, t, hue }) {
+function Readout({ p, t }) {
   const tone = p.score === null ? t.muted : p.score < 0 ? t.neg : t.pos;
   const away = p.kin.filter((k) => k.sector !== p.sector).length;
   const family = p.kin.length
@@ -244,20 +166,22 @@ function Readout({ p, t, hue }) {
     : 'nothing else moves closely with it';
 
   return (
-    <View style={{ marginTop: 7, paddingTop: 7, borderTopWidth: 1, borderTopColor: t.ruleSoft }}>
+    <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: t.ruleSoft }}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-        <Text style={{ color: hue, fontFamily: MONO, fontSize: 11 }}>{p.ticker}</Text>
-        <Text style={{ color: t.muted, fontSize: 11, flex: 1, marginLeft: 8 }} numberOfLines={1}>
+        <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11.5, fontWeight: '700' }}>
+          {p.ticker}
+        </Text>
+        <Text style={{ color: t.muted, fontSize: 11.5, flex: 1, marginLeft: 8 }} numberOfLines={1}>
           {p.name}
         </Text>
         <Text style={{ color: t.faint, fontSize: 10, marginLeft: 6 }}>
           {p.score === null ? 'unscored' : ordinal(p.place) + ' of ' + p.of}
         </Text>
-        <Text style={{ color: tone, fontFamily: MONO, fontSize: 11, marginLeft: 8 }}>
+        <Text style={{ color: tone, fontFamily: MONO, fontSize: 11.5, marginLeft: 8 }}>
           {p.score === null ? '—' : signed(p.score)}
         </Text>
       </View>
-      <Text style={{ color: t.faint, fontSize: 10, marginTop: 3, lineHeight: 14 }} numberOfLines={2}>
+      <Text style={{ color: t.faint, fontSize: 10.5, marginTop: 3, lineHeight: 15 }} numberOfLines={2}>
         {family}
         {p.kin.length ? ' · ' + p.kin.map((k) => k.ticker).join(' ') : ''}
       </Text>
@@ -265,8 +189,7 @@ function Readout({ p, t, hue }) {
   );
 }
 
-function SectorBlock({ s, t, dark, cols, peak, skin, pick, onPick }) {
-  const hue = hueFor(skin, s.hue);
+function SectorBlock({ s, t, dark, cols, peak, pick, onPick }) {
   const tone = s.score < 0 ? t.neg : t.pos;
   const w = 100 / cols + '%';
   const mine = pick && pick.sector === s.name && pick.tier === s.tier ? pick : null;
@@ -280,100 +203,95 @@ function SectorBlock({ s, t, dark, cols, peak, skin, pick, onPick }) {
   };
 
   return (
-    <View style={{ marginBottom: 12 }}>
+    <View
+      style={{
+        backgroundColor: t.surface,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: dark ? t.ruleSoft : t.rule,
+        paddingHorizontal: 12,
+        paddingVertical: 11,
+        marginBottom: 10,
+      }}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-        <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 11, width: 18 }}>{s.rank}</Text>
-        <Text
-          style={{
-            color: dark ? hue : t.ink,
-            flex: 1,
-            fontSize: skin.heading.fontSize,
-            fontWeight: skin.heading.fontWeight,
-            letterSpacing: skin.heading.letterSpacing,
-            fontFamily: skin.heading.mono ? MONO : undefined,
-          }}
-        >
-          {skin.heading.mono ? s.name.toUpperCase() : s.name}
-        </Text>
+        <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 11, width: 20 }}>{s.rank}</Text>
+        <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600', flex: 1 }}>{s.name}</Text>
         <Text style={{ color: tone, fontFamily: MONO, fontSize: 15, fontWeight: '700' }}>
           {signed(s.score)}
         </Text>
       </View>
 
-      <Text numberOfLines={1} style={{ color: t.faint, fontSize: 10, marginLeft: 18, marginTop: 1 }}>
+      <Text numberOfLines={1} style={{ color: t.faint, fontSize: 10.5, marginLeft: 20, marginTop: 2 }}>
         {s.gloss} · {pct(s.ret)}/yr · swing {pct(s.vol)} · {s.rising}/{s.n} up
         {s.etf ? ' · ' + s.etf + ' ' + signed(s.etfScore) : ''}
       </Text>
 
-      {/* Length is the score's size, colour its direction — ranking at a glance. */}
-      <View style={{ height: 3, marginTop: 5, marginLeft: 18, flexDirection: 'row' }}>
+      {/* Length is the score's size against the best sector; colour its direction. */}
+      <View
+        style={{
+          height: 3, marginTop: 7, marginLeft: 20, borderRadius: 2,
+          backgroundColor: t.ruleSoft, flexDirection: 'row', overflow: 'hidden',
+        }}
+      >
         <View
           style={{
             width: Math.min(Math.abs(s.score) / peak, 1) * 100 + '%',
-            backgroundColor: dark ? hue : tone,
-            borderRadius: skin.radius,
+            backgroundColor: tone,
+            borderRadius: 2,
           }}
         />
       </View>
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 }}>
         {s.constituents.map((c, i) => (
           <Cell
             key={c.ticker}
             c={c}
             t={t}
             w={w}
-            hue={hue}
             dark={dark}
-            skin={skin}
             state={stateOf(c.ticker)}
             onPress={() => onPick(s, c, i)}
           />
         ))}
       </View>
 
-      {mine && <Readout p={mine} t={t} hue={hue} />}
+      {mine && <Readout p={mine} t={t} />}
     </View>
   );
 }
 
-/** Two lists, two idioms — the tab bar wears whichever one is showing. */
-function Tabs({ tiers, active, onPick, t, dark }) {
+/** A quiet segmented control — the standard phone idiom for two views of one thing. */
+function Tabs({ tiers, active, onPick, t }) {
   return (
-    <View style={{ flexDirection: 'row', marginTop: 12, marginBottom: 2 }}>
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: t.ruleSoft,
+        borderRadius: 9,
+        padding: 3,
+        marginTop: 12,
+      }}
+    >
       {tiers.map((tier, i) => {
         const on = i === active;
-        const skin = skinFor(tier.key);
-        const hue = hueFor(skin, tier.sectors.length ? tier.sectors[0].hue : '#7ad9c8');
         return (
           <Pressable
             key={tier.key}
             onPress={() => { if (!on) { tapped(); onPick(i); } }}
             style={{
               flex: 1,
-              paddingVertical: 7,
+              paddingVertical: 6,
               alignItems: 'center',
-              borderRadius: skin.radius,
-              marginRight: i === 0 ? 6 : 0,
+              borderRadius: 7,
+              backgroundColor: on ? t.surface : 'transparent',
               borderWidth: 1,
-              borderColor: on ? (dark ? hue : t.rule) : t.ruleSoft,
-              backgroundColor: on
-                ? dark
-                  ? mix(skin.ground.dark, hue, skin.filled ? 0.2 : 0.08)
-                  : mix('#ffffff', hue, 0.18)
-                : 'transparent',
+              borderColor: on ? t.rule : 'transparent',
             }}
           >
-            <Text
-              style={{
-                color: on ? (dark ? hue : t.ink) : t.faint,
-                fontSize: 12,
-                fontWeight: '600',
-                letterSpacing: skin.heading.letterSpacing,
-                fontFamily: skin.heading.mono ? MONO : undefined,
-              }}
-            >
-              {skin.heading.mono ? tier.label.toUpperCase() : tier.label}
+            <Text style={{ color: on ? t.ink : t.faint, fontSize: 12.5, fontWeight: '600' }}>
+              {tier.label}
             </Text>
           </Pressable>
         );
@@ -393,54 +311,40 @@ function CrossTier({ pick, here, t, onClear }) {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
+        backgroundColor: t.surface,
         borderWidth: 1,
         borderColor: t.rule,
-        borderRadius: 4,
-        paddingVertical: 6,
-        paddingHorizontal: 9,
+        borderRadius: 8,
+        paddingVertical: 7,
+        paddingHorizontal: 10,
         marginBottom: 10,
       }}
     >
-      <Text style={{ color: t.muted, fontSize: 11, flex: 1 }} numberOfLines={1}>
+      <Text style={{ color: t.muted, fontSize: 11.5, flex: 1 }} numberOfLines={1}>
         Lit up: what moves with {pick.ticker} · {here} of {pick.kin.length} on this list
       </Text>
-      <Text style={{ color: t.faint, fontSize: 11 }}>clear</Text>
+      <Text style={{ color: t.accent, fontSize: 11.5, fontWeight: '600' }}>Clear</Text>
     </Pressable>
   );
 }
 
-function Legend({ t, dark, skin, hue }) {
-  const steps = [0, 0.25, 0.5, 0.75, 1];
-  const ground = dark ? skin.ground.dark : skin.ground.light;
+function Legend({ t, dark }) {
+  const steps = [-1.5, -0.75, 0, 0.75, 1.5];
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 9, flexWrap: 'wrap' }}>
-      <Text style={{ color: t.faint, fontSize: 10, marginRight: 5 }}>weakest</Text>
-      {steps.map((h) => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+      <Text style={{ color: t.faint, fontSize: 10.5, marginRight: 6 }}>lagging</Text>
+      {steps.map((z) => (
         <View
-          key={h}
-          style={
-            skin.filled
-              ? {
-                  width: 18, height: 9, borderRadius: skin.radius, marginRight: 2,
-                  backgroundColor: dark
-                    ? mix(ground, hue, 0.07 + 0.88 * h)
-                    : mix('#ffffff', hue, 0.14 + 0.72 * h),
-                }
-              : {
-                  width: 18, height: 9, borderRadius: skin.radius, marginRight: 2,
-                  borderWidth: 1,
-                  backgroundColor: dark
-                    ? mix(ground, hue, 0.03 + 0.17 * h)
-                    : mix('#ffffff', hue, 0.05 + 0.2 * h),
-                  borderColor: dark
-                    ? mix(ground, hue, 0.2 + 0.8 * h)
-                    : mix('#ffffff', hue, 0.35 + 0.65 * h),
-                }
-          }
+          key={z}
+          style={{
+            width: 18, height: 9, borderRadius: 2.5, marginRight: 2,
+            backgroundColor: cellFill(z, t, dark),
+            borderWidth: 1, borderColor: t.ruleSoft,
+          }}
         />
       ))}
-      <Text style={{ color: t.faint, fontSize: 10, marginLeft: 3 }}>
-        strongest in its own sector · each sector has its own colour
+      <Text style={{ color: t.faint, fontSize: 10.5, marginLeft: 4 }}>
+        leading — always against its own sector
       </Text>
     </View>
   );
@@ -473,11 +377,11 @@ function Freshness({ state, asOf, asOfISO, t }) {
     : { baked: t.faint, checking: t.faint, live: t.pos, stale: t.neg }[state];
 
   return (
-    <View style={{ flexDirection: 'row', marginTop: 12 }}>
+    <View style={{ flexDirection: 'row', marginTop: 10 }}>
       <View
         style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dot, marginRight: 7, marginTop: 5 }}
       />
-      <Text style={{ color: t.faint, fontSize: 12, flex: 1, lineHeight: 17 }}>
+      <Text style={{ color: t.faint, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
         {line}
         {FEED.url ? ' Pull down to refresh.' : ''}
         {stale && (
@@ -498,15 +402,15 @@ function Details({ t, open, onToggle, meta }) {
         backgroundColor: t.surface,
         borderColor: t.rule,
         borderWidth: 1,
-        borderRadius: 6,
+        borderRadius: 10,
         paddingHorizontal: 12,
-        paddingVertical: 9,
-        marginBottom: 16,
+        paddingVertical: 10,
+        marginBottom: 10,
       }}
     >
       <Pressable onPress={onToggle}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600', flex: 1 }}>
+          <Text style={{ color: t.ink, fontSize: 13.5, fontWeight: '600', flex: 1 }}>
             How this works
           </Text>
           <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 13 }}>{open ? '−' : '+'}</Text>
@@ -548,6 +452,7 @@ function tiersOf(data) {
 
 export default function App() {
   const dark = useColorScheme() === 'dark';
+  const t = dark ? DARK : LIGHT;
   const [pick, setPick] = useState(null);
   const [how, setHow] = useState(false);
   const [tab, setTab] = useState(0);
@@ -588,8 +493,6 @@ export default function App() {
 
   const tiers = React.useMemo(() => tiersOf(data), [data]);
   const active = tiers[Math.min(tab, tiers.length - 1)];
-  const skin = skinFor(active.key);
-  const t = { ...(dark ? DARK : LIGHT), ground: dark ? skin.ground.dark : skin.ground.light };
 
   // Which sector and which list every ticker sits in. Peers cross both, so the
   // readout can only count what is off-screen if it knows where everything is.
@@ -631,7 +534,7 @@ export default function App() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.ground }}>
       <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} />
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
+        contentContainerStyle={{ padding: 14, paddingBottom: 48 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           FEED.url ? (
@@ -639,28 +542,25 @@ export default function App() {
           ) : undefined
         }
       >
-        <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', lineHeight: 25 }}>
+        <Text style={{ color: t.ink, fontSize: 22, fontWeight: '700', lineHeight: 27, marginTop: 4 }}>
           Which sectors are climbing?
         </Text>
-        <Text style={{ color: t.muted, fontSize: 12, marginTop: 5, lineHeight: 17 }}>
+        <Text style={{ color: t.muted, fontSize: 12.5, marginTop: 6, lineHeight: 18 }}>
           {data.meta.blurb}
         </Text>
 
         <Freshness state={state} asOf={data.meta.asOf} asOfISO={data.meta.asOfISO} t={t} />
 
         {tiers.length > 1 && (
-          <Tabs tiers={tiers} active={tiers.indexOf(active)} onPick={setTab} t={t} dark={dark} />
+          <Tabs tiers={tiers} active={tiers.indexOf(active)} onPick={setTab} t={t} />
         )}
-        <Text style={{ color: t.faint, fontSize: 11, marginTop: 7, lineHeight: 16 }}>
-          {active.note}
-        </Text>
+        {!!active.note && (
+          <Text style={{ color: t.faint, fontSize: 11, marginTop: 8, lineHeight: 16 }}>
+            {active.note}
+          </Text>
+        )}
 
-        <Legend
-          t={t}
-          dark={dark}
-          skin={skin}
-          hue={hueFor(skin, active.sectors[0].hue)}
-        />
+        <Legend t={t} dark={dark} />
 
         <View style={{ height: 14 }} />
 
@@ -678,7 +578,6 @@ export default function App() {
             dark={dark}
             cols={cols}
             peak={peak}
-            skin={skin}
             pick={pick}
             onPick={choose}
           />
@@ -709,7 +608,6 @@ def build_data(payload: dict) -> dict:
             "tier": tier_key,
             "name": SHORT_NAMES.get(s["sector"], s["sector"]),
             "gloss": SECTOR_GLOSS.get(s["sector"], ""),
-            "hue": SECTOR_HUE.get(s["sector"], "#7ad9c8"),
             "rank": s["rank"],
             "score": round(s["score"], 4),
             "ret": round(s["ann_log_return"], 5),
@@ -800,10 +698,10 @@ def build_data(payload: dict) -> dict:
                 for t in tiers
             ],
             "blurb": (
-                f"{len(rendered[0])} corners of the US market, best first, by how steadily they "
-                f"climbed over nine months. Each sector has its own colour; the brighter a "
-                f"square, the stronger that company is inside it. Tap one to light up "
-                f"everything that moves with it — including on the other list."
+                f"{len(rendered[0])} corners of the US market, best first, by how steadily "
+                f"they climbed over nine months. Teal squares are leading their sector, "
+                f"rust squares are lagging it. Tap any company to light up everything that "
+                f"moves with it — including on the other list."
             ),
             "footer": (
                 "Prices from FMP, adjusted for splits and dividends. Information only — "
