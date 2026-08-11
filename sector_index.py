@@ -272,6 +272,26 @@ def vol_adjusted_9_1(levels: pd.Series) -> dict | None:
     }
 
 
+def monthly_returns(series: pd.Series) -> list[float]:
+    """Percent return for each whole month inside the 9-1 window, oldest first.
+
+    The window is a whole number of 21-day months by construction, so this
+    slices it into consecutive blocks rather than calendar months — the bars
+    line up with the score above them, which is the point of showing them.
+    """
+    start, end = window_bounds(len(series))
+    if start < 0:
+        return []
+    out: list[float] = []
+    i = start
+    while i + config.MOM_9_1_SKIP_DAYS <= end:
+        a = float(series.iloc[i])
+        b = float(series.iloc[i + config.MOM_9_1_SKIP_DAYS])
+        out.append(round((b / a - 1.0) * 100.0, 1) if a > 0 else 0.0)
+        i += config.MOM_9_1_SKIP_DAYS
+    return out
+
+
 def score_constituents(closes: pd.DataFrame, members: list[dict]) -> list[dict]:
     """Score each member on its own price series, then rank it inside its sector.
 
@@ -289,7 +309,11 @@ def score_constituents(closes: pd.DataFrame, members: list[dict]) -> list[dict]:
     scored: list[dict] = []
     for rec in members:
         stats = vol_adjusted_9_1(closes[rec["ticker"]].dropna()) or {}
-        scored.append({**rec, **{k: stats.get(k) for k in keep}})
+        scored.append({
+            **rec,
+            **{k: stats.get(k) for k in keep},
+            "monthly": monthly_returns(closes[rec["ticker"]]),
+        })
 
     raw = pd.Series(
         {r["ticker"]: r["score"] for r in scored if r["score"] is not None},
@@ -351,13 +375,15 @@ def _index_sector(sector: str, members: list[dict], closes: pd.DataFrame) -> dic
     """Chain one basket into an index and score it, or None if it cannot be."""
     scored = score_constituents(closes, members)
     tickers = [r["ticker"] for r in scored]
-    stats = vol_adjusted_9_1(equal_weight_index(closes[tickers]))
+    levels = equal_weight_index(closes[tickers])
+    stats = vol_adjusted_9_1(levels)
     if stats is None:
         return None
     return {
         "sector": sector,
         "n_constituents": len(tickers),
         **stats,
+        "monthly": monthly_returns(levels),
         "median_dollar_volume": float(
             np.median([r["median_dollar_volume"] for r in scored])
         ),
@@ -374,6 +400,7 @@ def _index_sector(sector: str, members: list[dict], closes: pd.DataFrame) -> dic
                 "sector_rank": r.get("sector_rank"),
                 "ann_log_return": r.get("ann_log_return"),
                 "ann_vol": r.get("ann_vol"),
+                "monthly": r.get("monthly") or [],
             }
             for r in scored
         ],

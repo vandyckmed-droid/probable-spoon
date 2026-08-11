@@ -128,16 +128,19 @@ def test_meta_reads_in_plain_words():
     assert str(config.SECTOR_INDEX_SIZE) in json.dumps(meta)  # basket size is data-driven
 
 
-def test_the_explainer_states_the_arithmetic_and_works_an_example():
-    """A reader must be able to check the sentence against the number on the
-    row, so the example is computed from this very payload."""
-    body = sector_snack.build_data(_payload())["meta"]["details"][0]["body"]
-    top = sector_snack.build_data(_payload())["sectors"][0]
+def test_the_explainer_lists_the_formula_rather_than_narrating_it():
+    """The score section is the formula, its two terms, and one worked example
+    from this very payload — not a paragraph of metaphor."""
+    data = sector_snack.build_data(_payload())
+    first, top = data["meta"]["details"][0], data["sectors"][0]
 
-    assert "÷" in body and "one divided by the other" in body
-    assert f"{round(top['ret'] * 100, 1)}" in body
-    assert f"{round(top['vol'] * 100, 1)}" in body
-    assert f"= {top['score']:.2f}" in body
+    assert first["title"] == "The formula"
+    assert first["mono"] is True                        # set as a formula, not prose
+    assert "score  =  rise ÷ swing" in first["body"]
+    assert f"{round(top['ret'] * 100, 1)} ÷ {round(top['vol'] * 100, 1)} = {top['score']:.2f}" in first["body"]
+    # no metaphors left anywhere in it
+    for word in ("shaking", "bump", "climbed for each unit"):
+        assert word not in " ".join(d["body"] for d in data["meta"]["details"])
 
 
 def test_the_explainer_never_hedges_or_describes_a_control_that_is_gone():
@@ -486,3 +489,47 @@ def test_unscored_names_are_listed_and_explained_not_hidden():
 
     assert "too new to score" in src
     assert "it has not been listed long enough" in src
+
+
+# ---------- month-by-month bars ----------
+
+def test_every_name_and_basket_carries_its_months():
+    payload = _payload()
+    for s in payload["tiers"][0]["sectors"]:
+        s["monthly"] = [1.5, -2.0, 3.25]
+        for c in s["constituents"]:
+            c["monthly"] = [0.5, -1.0, 2.0]
+    data = sector_snack.build_data(payload)
+
+    assert data["sectors"][0]["m"] == [1.5, -2.0, 3.25]
+    assert all(c["m"] == [0.5, -1.0, 2.0] for c in data["sectors"][0]["constituents"])
+
+
+def test_a_payload_without_months_still_builds():
+    """Bars are additive: an older feed simply has none, and the card hides."""
+    data = sector_snack.build_data(_payload())          # no "monthly" anywhere
+
+    assert data["sectors"][0]["m"] == []
+    assert all(c["m"] == [] for c in data["sectors"][0]["constituents"])
+    src = sector_snack.render_app(_payload())
+    assert "if (!values || !values.length) return null;" in src
+
+
+def test_bars_hang_off_a_zero_line_and_label_themselves():
+    src = sector_snack.render_app(_payload())
+
+    assert "function Bars({ values, t, end })" in src
+    assert "backgroundColor: t.pos" in src and "backgroundColor: t.neg" in src
+    assert "top: CHART_H / 2, height: 1" in src              # the zero line
+    assert "Each bar is one month, oldest on the left" in src
+    assert "v.toFixed(1)" in src            # a +0.3% month must not read as "+0"
+    # scaled to the biggest month in that chart, never across charts
+    assert "Math.max(...values.map((v) => Math.abs(v)), 1)" in src
+
+
+def test_both_a_company_and_a_sector_show_their_months():
+    src = sector_snack.render_app(_payload())
+
+    assert "<Bars values={c.m} t={t} end={windowEnd} />" in src
+    assert "<Bars values={s.m} t={t} end={windowEnd} />" in src
+    assert '"windowEnd"' in json.dumps(sector_snack.build_data(_payload())["meta"])

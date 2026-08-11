@@ -29,7 +29,7 @@ than either 25-name tier did (rank correlation 0.83).
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/lo8fxonAKzb7T0SVCN_La** — open it in Expo
+**Live link: https://snack.expo.dev/3cwHlXKD7hTdTzPBPSOMD** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -102,10 +102,11 @@ and a "big-fund version column", neither of which had existed for two rewrites,
 and it hedged throughout ("about 1.0", "a few weeks", "flatters them a little",
 "climb-per-bump score").
 
-It now says the score is one number divided by another, names both, and works
-a real example straight out of the payload being rendered: "Technology rose
-78.3% a year and moved 36.6%. 78.3 ÷ 36.6 = 2.14, the score you see on its
-row." A reader can check the sentence against the row. The rank correlation is
+It now sets the formula out as a formula and stops there — `score = rise ÷
+swing`, the two terms defined in a line each, and one worked example straight
+out of the payload being rendered (`78.3 ÷ 36.6 = 2.14`). The prose walkthrough
+that surrounded it was cut on the same instruction that produced it: "just list
+formula, stop explaining that way." The rank correlation is
 given as 0.83 with its scale stated, not as "83% agreement" — a rank
 correlation is not a percentage of agreement, and calling it one was the most
 misleading line on the screen. The survivorship caveat says outright that these
@@ -115,6 +116,21 @@ Tests enforce it: the worked example must match the payload, the honest-caveat
 sentences must be present, and a list of banned hedges and dead-UI words must
 not appear. Paragraphs are laid out as separate elements rather than newlines
 inside one string, so the breaks that make the screen readable cannot collapse.
+
+### Month by month
+
+Every basket and every company ships eight monthly returns — the scoring window
+is exactly eight 21-day months, so `monthly_returns()` cuts it into consecutive
+blocks rather than calendar months and the bars line up with the score above
+them. They compound back to the window return exactly (Technology: 68.6% either
+way), which is the check that they are the same nine months and not a
+lookalike.
+
+The app draws them as bars off a zero line, up green and down orange, oldest on
+the left, each carrying its own percentage to one decimal — whole percents
+turned a +0.3% month into "+0". Heights scale to the biggest month in that
+chart, so shape is comparable within a chart and never across two. A feed built
+before this simply has no months and the card does not appear.
 
 ### Why the numbers are fetched, not baked
 

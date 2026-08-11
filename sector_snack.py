@@ -143,6 +143,66 @@ function Bar({ value, peak, t, width }) {
   );
 }
 
+/**
+ * Month-by-month returns as bars off a zero line: up green, down orange, one
+ * bar per month, oldest on the left. Heights are scaled to the biggest month
+ * on screen, so the shape is comparable within a chart and never across one.
+ * Each bar carries its own number — the picture shows the shape, the label
+ * gives the fact.
+ */
+const CHART_H = 58;
+
+function Bars({ values, t, end }) {
+  if (!values || !values.length) return null;
+  const peak = Math.max(...values.map((v) => Math.abs(v)), 1);
+  return (
+    <View>
+      <View style={{ flexDirection: 'row', height: CHART_H, alignItems: 'stretch' }}>
+        {/* the zero line the bars hang off */}
+        <View
+          pointerEvents="none"
+          style={{ position: 'absolute', left: 0, right: 0, top: CHART_H / 2, height: 1, backgroundColor: t.rule }}
+        />
+        {values.map((v, i) => {
+          const h = Math.max((Math.abs(v) / peak) * (CHART_H / 2 - 2), 1.5);
+          return (
+            <View key={i} style={{ flex: 1, marginHorizontal: 1.5 }}>
+              <View style={{ height: CHART_H / 2, justifyContent: 'flex-end' }}>
+                {v >= 0 ? (
+                  <View style={{ height: h, borderRadius: 2, backgroundColor: t.pos }} />
+                ) : null}
+              </View>
+              <View style={{ height: CHART_H / 2, justifyContent: 'flex-start' }}>
+                {v < 0 ? (
+                  <View style={{ height: h, borderRadius: 2, backgroundColor: t.neg }} />
+                ) : null}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+      <View style={{ flexDirection: 'row', marginTop: 5 }}>
+        {values.map((v, i) => (
+          <Text
+            key={i}
+            numberOfLines={1}
+            style={{
+              flex: 1, textAlign: 'center', fontFamily: MONO, fontSize: 8.5,
+              color: v < 0 ? t.neg : t.muted,
+            }}
+          >
+            {/* one decimal: a +0.3% month must not render as "+0" */}
+            {(v >= 0 ? '+' : '') + v.toFixed(1)}
+          </Text>
+        ))}
+      </View>
+      <Text style={{ color: t.faint, fontSize: 11, marginTop: 8, lineHeight: 16 }}>
+        Each bar is one month, oldest on the left, ending {end}. Percent change in that month.
+      </Text>
+    </View>
+  );
+}
+
 /** A screen-wide press target. Every interaction in this app is one of these. */
 function Row({ t, onPress, children, last }) {
   return (
@@ -353,7 +413,7 @@ function SectorsScreen({ data, tiers, tab, setTab, t, peak, wlCount, onOpenSecto
  * screen is that it is boring: rank, ticker, name, score, one hairline. Fifty
  * rows scroll in a second and every one is a comfortable target.
  */
-function SectorScreen({ s, t, wl, peak, onOpenCompany }) {
+function SectorScreen({ s, t, wl, peak, windowEnd, onOpenCompany }) {
   const scored = s.constituents.filter((c) => c.score !== null);
   const unscored = s.constituents.filter((c) => c.score === null);
   return (
@@ -376,6 +436,17 @@ function SectorScreen({ s, t, wl, peak, onOpenCompany }) {
           </Text>
         ) : null}
       </View>
+
+      {s.m && s.m.length ? (
+        <Card t={t} style={{ marginTop: 16 }}>
+          <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
+            <Text style={{ color: t.muted, fontSize: 13, marginBottom: 12 }}>
+              The basket, month by month
+            </Text>
+            <Bars values={s.m} t={t} end={windowEnd} />
+          </View>
+        </Card>
+      ) : null}
 
       <GroupLabel t={t} right={scored.length + ' companies'}>Strongest first</GroupLabel>
 
@@ -424,7 +495,7 @@ function SectorScreen({ s, t, wl, peak, onOpenCompany }) {
  * rows like everything else, so following one is the same gesture as
  * everything else.
  */
-function CompanyScreen({ c, home, kin, t, watched, onWatch, onOpenCompany }) {
+function CompanyScreen({ c, home, kin, t, watched, windowEnd, onWatch, onOpenCompany }) {
   const away = kin.filter((k) => k.sector !== home.sector).length;
   return (
     <View style={{ paddingHorizontal: 14, paddingBottom: 40 }}>
@@ -449,6 +520,15 @@ function CompanyScreen({ c, home, kin, t, watched, onWatch, onOpenCompany }) {
           </Text>
         </View>
       </Card>
+
+      {c.m && c.m.length ? (
+        <Card t={t} style={{ marginTop: 14 }}>
+          <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
+            <Text style={{ color: t.muted, fontSize: 13, marginBottom: 12 }}>Month by month</Text>
+            <Bars values={c.m} t={t} end={windowEnd} />
+          </View>
+        </Card>
+      ) : null}
 
       <Pressable
         onPress={onWatch}
@@ -552,7 +632,11 @@ function HowScreen({ meta, t }) {
           {d.body.split('\n\n').map((para, i) => (
             <Text
               key={i}
-              style={{ color: t.muted, fontSize: 13.5, lineHeight: 20, marginTop: i ? 10 : 5 }}
+              style={{
+                color: t.muted, lineHeight: d.mono ? 19 : 20, marginTop: i ? 10 : 5,
+                fontSize: d.mono ? 12.5 : 13.5,
+                fontFamily: d.mono ? MONO : undefined,
+              }}
             >
               {para}
             </Text>
@@ -669,7 +753,7 @@ export default function App() {
           const place = scored.indexOf(c) + 1;
           m[c.ticker] = {
             ticker: c.ticker, name: c.name, score: c.score, sector: s.name,
-            tier: tier.key, place: place || null, of: scored.length,
+            tier: tier.key, place: place || null, of: scored.length, m: c.m || [],
           };
           if (c.score !== null) universe.push(m[c.ticker]);
         });
@@ -724,7 +808,10 @@ export default function App() {
     const s = (tiers.find((x) => x.key === here.tier) || active).sectors.find((x) => x.name === here.name);
     title = here.name;
     body = s ? (
-      <SectorScreen s={s} t={t} wl={wl} peak={namePeak} onOpenCompany={(c) => openCompany(c.ticker)} />
+      <SectorScreen
+        s={s} t={t} wl={wl} peak={namePeak} windowEnd={data.meta.windowEnd}
+        onOpenCompany={(c) => openCompany(c.ticker)}
+      />
     ) : null;
   } else if (here.k === 'company') {
     const c = lookup[here.ticker];
@@ -734,7 +821,7 @@ export default function App() {
       .filter(Boolean);
     body = c ? (
       <CompanyScreen
-        c={c} home={c} kin={kin} t={t} watched={!!wl[here.ticker]}
+        c={c} home={c} kin={kin} t={t} watched={!!wl[here.ticker]} windowEnd={data.meta.windowEnd}
         onWatch={() => toggleWatch(here.ticker)} onOpenCompany={openCompany}
       />
     ) : null;
@@ -803,6 +890,7 @@ def build_data(payload: dict) -> dict:
             "rank": s["rank"],
             "score": round(s["score"], 4),
             "verdict": verdict_for(s["score"]),
+            "m": s.get("monthly") or [],
             "ret": round(s["ann_log_return"], 5),
             "vol": round(s["ann_vol"], 5),
             "n": s["n_constituents"],
@@ -814,6 +902,7 @@ def build_data(payload: dict) -> dict:
                     "ticker": c["ticker"],
                     "name": trim_company(c.get("name") or c["ticker"]),
                     "score": None if c["score"] is None else round(c["score"], 3),
+                    "m": c.get("monthly") or [],
                     "z": None if c["sector_z"] is None else round(c["sector_z"], 3),
                 }
                 for c in s["constituents"]
@@ -860,20 +949,22 @@ def build_data(payload: dict) -> dict:
 
     details = [
         {
-            "title": "What the score is",
+            "title": "The formula",
+            "mono": True,
             "body": (
-                "Two measurements, one divided by the other.\n\n"
-                "Top: how fast the basket rose over the nine months, written as a "
-                "yearly rate.\n"
-                "Bottom: how much it moved up and down day to day over those same "
-                "nine months, also written as a yearly rate. That is the number each "
-                "sector page calls its typical swing.\n\n"
-                f"{lead['name']} rose {lead_ret}% a year and moved {lead_vol}%. "
-                f"{lead_ret} ÷ {lead_vol} = {lead['score']:.2f}, the score you see on "
-                "its row.\n\n"
-                "So the score is how much a sector climbed for each unit of shaking "
-                "along the way. 1.00 means it rose exactly as fast as it shook. 0 "
-                "means it went nowhere. Below 0 means it fell."
+                "score  =  rise ÷ swing\n\n"
+                "rise    yearly % gain over the nine months\n"
+                "swing   yearly % up-and-down over the same days\n\n"
+                f"{lead['name']}\n"
+                f"{lead_ret} ÷ {lead_vol} = {lead['score']:.2f}"
+            ),
+        },
+        {
+            "title": "Reading it",
+            "body": (
+                "Above 1.00 the sector rose faster than it moved around. "
+                "0 is flat. Below 0 it fell.\n\n"
+                "Swing is the number each sector page calls its typical swing."
             ),
         },
         {
@@ -957,6 +1048,7 @@ def build_data(payload: dict) -> dict:
         "meta": {
             "asOf": pretty_date(payload["as_of"]),
             "asOfISO": payload["as_of"],
+            "windowEnd": pretty_date(first["window_end"]),
             "tiers": [
                 {"key": t["key"], "label": t["label"], "note": t["note"]}
                 for t in tiers
