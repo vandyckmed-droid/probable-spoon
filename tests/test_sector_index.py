@@ -293,3 +293,61 @@ def test_a_flat_name_has_no_peers_and_breaks_nothing():
 
     assert "FLAT" not in peers
     assert peers["A"][0]["ticker"] == "B"
+
+
+# ---------- tiers ----------
+
+def _tier_candidates(n):
+    return [
+        {"ticker": f"T{i:02d}", "name": f"Name {i}", "industry": "x", "market_cap": 1e10}
+        for i in range(n)
+    ]
+
+
+def _tier_panel(tickers, n=260):
+    idx = pd.date_range("2023-01-02", periods=n, freq="B")
+    rng = np.random.default_rng(5)
+    return (
+        pd.DataFrame({t: 100 * np.exp(np.cumsum(rng.normal(0, 0.01, n))) for t in tickers}, index=idx),
+        # Descending volume so the liquidity order is known and testable.
+        pd.DataFrame({t: np.full(n, 1e7 - i * 1e4) for i, t in enumerate(tickers)}, index=idx),
+    )
+
+
+def test_tiers_are_consecutive_slices_of_one_liquidity_ranking():
+    cands = _tier_candidates(60)
+    closes, volumes = _tier_panel([c["ticker"] for c in cands])
+
+    clean, _ = sector_index.clean_candidates(cands, closes, volumes)
+    first = sector_index.tier_slice(clean, 0)
+    second = sector_index.tier_slice(clean, 1)
+
+    size = config.SECTOR_INDEX_SIZE
+    assert len(first) == len(second) == size
+    assert not ({c["ticker"] for c in first} & {c["ticker"] for c in second})
+    # Every tier-2 name is less liquid than every tier-1 name; that is the split.
+    assert min(c["median_dollar_volume"] for c in first) >= \
+           max(c["median_dollar_volume"] for c in second)
+
+
+def test_a_short_tier_comes_back_short_so_the_caller_can_skip_it():
+    cands = _tier_candidates(40)
+    closes, volumes = _tier_panel([c["ticker"] for c in cands])
+
+    clean, _ = sector_index.clean_candidates(cands, closes, volumes)
+
+    assert len(sector_index.tier_slice(clean, 0)) == config.SECTOR_INDEX_SIZE
+    assert len(sector_index.tier_slice(clean, 1)) < config.SECTOR_INDEX_SIZE
+    assert sector_index.tier_slice(clean, 5) == []
+
+
+def test_select_constituents_still_returns_the_first_tier():
+    """The old entry point keeps its old meaning."""
+    cands = _tier_candidates(60)
+    closes, volumes = _tier_panel([c["ticker"] for c in cands])
+
+    keep, rejected = sector_index.select_constituents(cands, closes, volumes)
+    clean, _ = sector_index.clean_candidates(cands, closes, volumes)
+
+    assert [c["ticker"] for c in keep] == [c["ticker"] for c in sector_index.tier_slice(clean, 0)]
+    assert len(rejected) == 60 - config.SECTOR_INDEX_SIZE

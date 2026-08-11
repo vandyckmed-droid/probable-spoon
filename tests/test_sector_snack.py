@@ -41,11 +41,20 @@ def _payload(n=3):
             ],
         }
 
+    top = [sector("Technology", 1, 2.3, "XLK"), sector("Utilities", 2, -0.4, "XLU")]
+    nxt = [sector("Technology", 1, 1.1, "XLK")]
+    for s in nxt:                                   # tier 2 holds different names
+        for i, c in enumerate(s["constituents"]):
+            c["ticker"] = "N" + c["ticker"]
     return {
         "as_of": "2026-08-10",
         "generated": "2026-08-11T04:00:00",
         "method": "...",
-        "sectors": [sector("Technology", 1, 2.3, "XLK"), sector("Utilities", 2, -0.4, "XLU")],
+        "tiers": [
+            {"key": "top", "label": "Top 25", "note": "the most-traded", "sectors": top},
+            {"key": "next", "label": "Next 25", "note": "one rung down", "sectors": nxt},
+        ],
+        "sectors": top,
         "benchmark": {
             "etfs": {
                 "Technology": {"etf": "XLK", "score": 1.9},
@@ -239,3 +248,60 @@ def test_the_app_guards_against_a_broken_feed():
     assert "function usable(" in src           # shape check before the feed is trusted
     assert "useState(BAKED)" in src            # the snapshot is what it starts from
     assert ".catch(() => setState('stale'))" in src
+
+
+# ---------- two tiers ----------
+
+def test_both_tiers_render_and_stay_separate():
+    data = sector_snack.build_data(_payload())
+
+    assert [s["tier"] for s in data["sectors"]] == ["top", "top"]
+    assert [s["tier"] for s in data["sectors2"]] == ["next"]
+    top = {c["ticker"] for s in data["sectors"] for c in s["constituents"]}
+    nxt = {c["ticker"] for s in data["sectors2"] for c in s["constituents"]}
+    assert not (top & nxt)                       # a name belongs to exactly one list
+
+
+def test_tier_labels_reach_the_app():
+    meta = sector_snack.build_data(_payload())["meta"]
+
+    assert [t["key"] for t in meta["tiers"]] == ["top", "next"]
+    assert all(t["label"] and t["note"] for t in meta["tiers"])
+    # The app keys its two visual languages off exactly these.
+    assert set(t["key"] for t in meta["tiers"]) <= {"top", "next"}
+
+
+def test_a_sector_missing_from_tier_two_is_simply_absent():
+    """Communication Services has too few clean names for a second basket."""
+    data = sector_snack.build_data(_payload())
+
+    assert len(data["sectors"]) == 2
+    assert len(data["sectors2"]) == 1
+    assert "Utilities" not in [s["name"] for s in data["sectors2"]]
+
+
+def test_a_single_tier_payload_still_builds():
+    """The shape that predates the split must not need a second list."""
+    payload = _payload()
+    payload.pop("tiers")
+    data = sector_snack.build_data(payload)
+
+    assert data["sectors2"] == []
+    assert [t["key"] for t in data["meta"]["tiers"]] == ["top"]
+
+
+def test_the_app_hides_the_tab_bar_when_there_is_one_list():
+    src = sector_snack.render_app(_payload())
+
+    assert "tiers.length > 1 &&" in src
+    assert ".filter((tier) => tier.sectors.length)" in src
+
+
+def test_the_two_skins_differ_in_more_than_colour():
+    src = sector_snack.render_app(_payload())
+    top = re.search(r"top: \{(.*?)\n  \},", src, re.S).group(1)
+    nxt = re.search(r"next: \{(.*?)\n  \},", src, re.S).group(1)
+
+    assert "filled: true" in top and "glow: true" in top and "radius: 2" in top
+    assert "filled: false" in nxt and "glow: false" in nxt and "radius: 0" in nxt
+    assert "steel: 0.4" in nxt and "mono: true" in nxt

@@ -1,8 +1,32 @@
 # Sector "ETFs" — 25-name equal weight, ranked on vol-adjusted 9-1 momentum
 
-Builds one synthetic equal-weight index per GICS-style sector out of that
-sector's 25 most liquid US-listed stocks, then ranks the sectors on
+Builds synthetic equal-weight indices per GICS-style sector out of that
+sector's most liquid US-listed stocks, then ranks the sectors on
 volatility-adjusted 9-1 log return.
+
+## Tiers
+
+Each sector's clean names are sorted by liquidity once and cut into consecutive
+blocks of `SECTOR_INDEX_SIZE`, one tier per block (`config.SECTOR_TIERS`). Tier
+2 is therefore *the next 25 down*, not a different kind of company — the split
+is a single cut through one ranking, so "one rung down the size ladder" is
+literally what it means.
+
+Each tier is a separate index, scored and ranked entirely within itself: tier
+2's z-scores are against tier-2 peers, its breadth counts tier-2 names, its
+rank order is its own. That is the point of separating them. Financial
+Services currently sits last on tier 1 at −0.33 and fourth on tier 2 at +1.30;
+averaged into one 50-name basket that divergence would vanish, which is exactly
+the reading worth having.
+
+A tier short of a full basket is skipped rather than padded — Communication
+Services has only 23 clean names below its top 25, so it has no tier 2 and the
+second list carries 10 sectors rather than 11. `--benchmark` scores each tier
+against the SPDRs separately; tier 2 agrees less (0.59 against 0.75) because a
+cap-weighted fund is dominated by precisely the names tier 2 excludes.
+
+Correlation spans every name in every tier, so a family found on one list keeps
+its members on the other.
 
 ```bash
 export FMP_API_KEY=...          # or API_KEY, or paste it into config.py
@@ -28,7 +52,7 @@ them from git history if that ever changes.
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/O7TBnfa3jgztJILm_HJZb** — open it in Expo
+**Live link: https://snack.expo.dev/XPWcdurzg01b7HhgmGa_b** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -57,6 +81,22 @@ An earlier build hid the names behind a per-sector expand, which cost roughly
 925pt of scroll to read one sector's 25 names against about 84pt now. It reads
 the phone's colour scheme and uses pure React Native primitives — no
 dependencies for Expo Go to resolve.
+
+### Two lists, two visual languages
+
+The tiers get their own screens behind a tab bar, not more rows on one screen —
+550 cells on a single scroll is not a phone screen, it is a wall. Selection
+survives the switch on purpose: tap NVDA on the first list, move to the second,
+and its relatives there are still lit, with a banner naming whose family is on
+screen so the dimming does not read as a fault.
+
+`SKINS` in the bundle keys the visual language off the tier. Tier 1 is *lit*:
+filled cells, rounded corners, a hue-coloured glow scaled by score. Tier 2 is
+*drawn*: near-black cells with the heat in the border rather than the fill,
+square corners, no glow, sector headings in spaced uppercase mono. The hues are
+the same family in both — tier 2 pulls each one 40% toward gunmetal — so a
+sector stays recognisable across the switch while nothing else about the
+construction matches.
 
 ### Colour, brightness and family
 

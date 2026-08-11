@@ -107,6 +107,38 @@ const DARK = {
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
 
+/**
+ * The two lists get two visual languages, not two colour swaps. Tier 1 is
+ * solid and lit: filled cells, rounded, glowing in the sector's own neon. Tier
+ * 2 is drawn rather than lit — near-black cells outlined in a steel-shifted
+ * version of the same hue, square corners, no glow, headings in spaced mono.
+ * Same hue family in both so a sector stays recognisable across the switch;
+ * everything else about the construction differs.
+ */
+const SKINS = {
+  top: {
+    ground: { dark: '#0f1513', light: '#f6f7f6' },
+    steel: 0,
+    filled: true,
+    glow: true,
+    radius: 2,
+    heading: { fontSize: 15, fontWeight: '600', letterSpacing: 0 },
+    tab: 'Top 25',
+  },
+  next: {
+    ground: { dark: '#0b1016', light: '#f1f3f6' },
+    steel: 0.4,                 // hue pulled toward gunmetal
+    filled: false,
+    glow: false,
+    radius: 0,
+    heading: { fontSize: 13, fontWeight: '600', letterSpacing: 1.1, mono: true },
+    tab: 'Next 25',
+  },
+};
+const STEEL = '#8ea3b4';
+const skinFor = (key) => SKINS[key] || SKINS.top;
+const hueFor = (skin, hue) => (skin.steel ? mix(hue, STEEL, skin.steel) : hue);
+
 /** Blend two hex colours. t=0 keeps `from`, t=1 lands on `to`. */
 function mix(from, to, t) {
   const parts = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
@@ -137,27 +169,44 @@ function ordinal(n) {
 }
 
 /**
- * One ticker, lit in its sector's hue at a brightness set by its score. When
- * a name is selected, everything unrelated to it drops away to near-nothing —
- * the point is to see the family, so the rest has to stop competing.
+ * One ticker. Tier 1 fills and glows; tier 2 draws an outline and leaves the
+ * middle dark. Either way brightness is the score, colour is the sector, and a
+ * name unrelated to the current selection drops away to near-nothing.
  */
-function Cell({ c, t, w, hue, dark, state, onPress }) {
+function Cell({ c, t, w, hue, dark, skin, state, onPress }) {
   const heat = lift(c.z);
-  const bg = dark
-    ? mix(t.ground, hue, 0.07 + 0.88 * heat)
-    : mix('#ffffff', hue, 0.14 + 0.72 * heat);
-  const ink = dark ? (heat > 0.5 ? '#04100d' : '#c2cfcb') : '#14201d';
+  const ground = dark ? skin.ground.dark : skin.ground.light;
 
-  // Glow is a dark-mode affair; on a light ground it just muddies the cell.
-  const glow = dark
-    ? {
-        shadowColor: hue,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.25 + 0.6 * heat,
-        shadowRadius: 1 + 7 * heat,
-        elevation: Math.round(1 + 5 * heat),
-      }
-    : null;
+  let bg;
+  let ink;
+  let border;
+  if (skin.filled) {
+    bg = dark ? mix(ground, hue, 0.07 + 0.88 * heat) : mix('#ffffff', hue, 0.14 + 0.72 * heat);
+    ink = dark ? (heat > 0.5 ? '#04100d' : '#c2cfcb') : '#14201d';
+    border = state === 'chosen' ? t.ink : state === 'kin' ? hue : 'transparent';
+  } else {
+    // Outlined: the fill barely lifts off the ground, the edge carries the heat.
+    bg = dark ? mix(ground, hue, 0.03 + 0.17 * heat) : mix('#ffffff', hue, 0.05 + 0.2 * heat);
+    ink = dark ? mix('#5f7078', hue, 0.25 + 0.75 * heat) : mix('#5a6a72', hue, 0.3 * heat);
+    border =
+      state === 'chosen'
+        ? t.ink
+        : dark
+        ? mix(ground, hue, 0.2 + 0.8 * heat)
+        : mix('#ffffff', hue, 0.35 + 0.65 * heat);
+  }
+
+  // Glow is a tier-1, dark-mode affair; elsewhere it only muddies the cell.
+  const glow =
+    skin.glow && dark
+      ? {
+          shadowColor: hue,
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.25 + 0.6 * heat,
+          shadowRadius: 1 + 7 * heat,
+          elevation: Math.round(1 + 5 * heat),
+        }
+      : null;
 
   return (
     <Pressable
@@ -167,12 +216,11 @@ function Cell({ c, t, w, hue, dark, state, onPress }) {
       <View
         style={{
           backgroundColor: bg,
-          borderRadius: 2,
+          borderRadius: skin.radius,
           paddingVertical: 3,
           alignItems: 'center',
           borderWidth: 1,
-          borderColor:
-            state === 'chosen' ? t.ink : state === 'kin' ? hue : 'transparent',
+          borderColor: border,
           ...(glow || {}),
         }}
       >
@@ -217,15 +265,17 @@ function Readout({ p, t, hue }) {
   );
 }
 
-function SectorBlock({ s, t, dark, cols, peak, pick, onPick }) {
-  const hue = s.hue;
+function SectorBlock({ s, t, dark, cols, peak, skin, pick, onPick }) {
+  const hue = hueFor(skin, s.hue);
   const tone = s.score < 0 ? t.neg : t.pos;
   const w = 100 / cols + '%';
-  const mine = pick && pick.sector === s.name ? pick : null;
+  const mine = pick && pick.sector === s.name && pick.tier === s.tier ? pick : null;
 
   const stateOf = (ticker) => {
     if (!pick) return 'plain';
-    if (pick.sector === s.name && pick.ticker === ticker) return 'chosen';
+    if (pick.tier === s.tier && pick.sector === s.name && pick.ticker === ticker) {
+      return 'chosen';
+    }
     return pick.kinSet[ticker] ? 'kin' : 'muted';
   };
 
@@ -233,8 +283,17 @@ function SectorBlock({ s, t, dark, cols, peak, pick, onPick }) {
     <View style={{ marginBottom: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
         <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 11, width: 18 }}>{s.rank}</Text>
-        <Text style={{ color: dark ? hue : t.ink, fontSize: 15, fontWeight: '600', flex: 1 }}>
-          {s.name}
+        <Text
+          style={{
+            color: dark ? hue : t.ink,
+            flex: 1,
+            fontSize: skin.heading.fontSize,
+            fontWeight: skin.heading.fontWeight,
+            letterSpacing: skin.heading.letterSpacing,
+            fontFamily: skin.heading.mono ? MONO : undefined,
+          }}
+        >
+          {skin.heading.mono ? s.name.toUpperCase() : s.name}
         </Text>
         <Text style={{ color: tone, fontFamily: MONO, fontSize: 15, fontWeight: '700' }}>
           {signed(s.score)}
@@ -252,7 +311,7 @@ function SectorBlock({ s, t, dark, cols, peak, pick, onPick }) {
           style={{
             width: Math.min(Math.abs(s.score) / peak, 1) * 100 + '%',
             backgroundColor: dark ? hue : tone,
-            borderRadius: 2,
+            borderRadius: skin.radius,
           }}
         />
       </View>
@@ -266,6 +325,7 @@ function SectorBlock({ s, t, dark, cols, peak, pick, onPick }) {
             w={w}
             hue={hue}
             dark={dark}
+            skin={skin}
             state={stateOf(c.ticker)}
             onPress={() => onPick(s, c, i)}
           />
@@ -277,23 +337,106 @@ function SectorBlock({ s, t, dark, cols, peak, pick, onPick }) {
   );
 }
 
-function Legend({ t, dark, hue }) {
-  const steps = [0, 0.25, 0.5, 0.75, 1];
+/** Two lists, two idioms — the tab bar wears whichever one is showing. */
+function Tabs({ tiers, active, onPick, t, dark }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 7, flexWrap: 'wrap' }}>
+    <View style={{ flexDirection: 'row', marginTop: 12, marginBottom: 2 }}>
+      {tiers.map((tier, i) => {
+        const on = i === active;
+        const skin = skinFor(tier.key);
+        const hue = hueFor(skin, tier.sectors.length ? tier.sectors[0].hue : '#7ad9c8');
+        return (
+          <Pressable
+            key={tier.key}
+            onPress={() => { if (!on) { tapped(); onPick(i); } }}
+            style={{
+              flex: 1,
+              paddingVertical: 7,
+              alignItems: 'center',
+              borderRadius: skin.radius,
+              marginRight: i === 0 ? 6 : 0,
+              borderWidth: 1,
+              borderColor: on ? (dark ? hue : t.rule) : t.ruleSoft,
+              backgroundColor: on
+                ? dark
+                  ? mix(skin.ground.dark, hue, skin.filled ? 0.2 : 0.08)
+                  : mix('#ffffff', hue, 0.18)
+                : 'transparent',
+            }}
+          >
+            <Text
+              style={{
+                color: on ? (dark ? hue : t.ink) : t.faint,
+                fontSize: 12,
+                fontWeight: '600',
+                letterSpacing: skin.heading.letterSpacing,
+                fontFamily: skin.heading.mono ? MONO : undefined,
+              }}
+            >
+              {skin.heading.mono ? tier.label.toUpperCase() : tier.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * A selection made on the other list still lights names here, so say whose
+ * family is on screen — otherwise the dimming looks like a fault.
+ */
+function CrossTier({ pick, here, t, onClear }) {
+  return (
+    <Pressable
+      onPress={onClear}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: t.rule,
+        borderRadius: 4,
+        paddingVertical: 6,
+        paddingHorizontal: 9,
+        marginBottom: 10,
+      }}
+    >
+      <Text style={{ color: t.muted, fontSize: 11, flex: 1 }} numberOfLines={1}>
+        Lit up: what moves with {pick.ticker} · {here} of {pick.kin.length} on this list
+      </Text>
+      <Text style={{ color: t.faint, fontSize: 11 }}>clear</Text>
+    </Pressable>
+  );
+}
+
+function Legend({ t, dark, skin, hue }) {
+  const steps = [0, 0.25, 0.5, 0.75, 1];
+  const ground = dark ? skin.ground.dark : skin.ground.light;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 9, flexWrap: 'wrap' }}>
       <Text style={{ color: t.faint, fontSize: 10, marginRight: 5 }}>weakest</Text>
       {steps.map((h) => (
         <View
           key={h}
-          style={{
-            width: 18,
-            height: 9,
-            borderRadius: 2,
-            marginRight: 2,
-            backgroundColor: dark
-              ? mix(t.ground, hue, 0.07 + 0.88 * h)
-              : mix('#ffffff', hue, 0.14 + 0.72 * h),
-          }}
+          style={
+            skin.filled
+              ? {
+                  width: 18, height: 9, borderRadius: skin.radius, marginRight: 2,
+                  backgroundColor: dark
+                    ? mix(ground, hue, 0.07 + 0.88 * h)
+                    : mix('#ffffff', hue, 0.14 + 0.72 * h),
+                }
+              : {
+                  width: 18, height: 9, borderRadius: skin.radius, marginRight: 2,
+                  borderWidth: 1,
+                  backgroundColor: dark
+                    ? mix(ground, hue, 0.03 + 0.17 * h)
+                    : mix('#ffffff', hue, 0.05 + 0.2 * h),
+                  borderColor: dark
+                    ? mix(ground, hue, 0.2 + 0.8 * h)
+                    : mix('#ffffff', hue, 0.35 + 0.65 * h),
+                }
+          }
         />
       ))}
       <Text style={{ color: t.faint, fontSize: 10, marginLeft: 3 }}>
@@ -394,11 +537,20 @@ function usable(d) {
   return !!(d && d.meta && d.meta.asOf && Array.isArray(d.sectors) && d.sectors.length);
 }
 
+/** The tiers the feed actually carries, oldest shape included. */
+function tiersOf(data) {
+  const specs = data.meta.tiers || [{ key: 'top', label: 'Top 25', note: '' }];
+  const lists = [data.sectors, data.sectors2];
+  return specs
+    .map((spec, i) => ({ ...spec, sectors: lists[i] || [] }))
+    .filter((tier) => tier.sectors.length);
+}
+
 export default function App() {
   const dark = useColorScheme() === 'dark';
-  const t = dark ? DARK : LIGHT;
   const [pick, setPick] = useState(null);
   const [how, setHow] = useState(false);
+  const [tab, setTab] = useState(0);
   // Cells stay legible rather than stretching: more room means more columns.
   const { width } = useWindowDimensions();
   const cols = width >= 430 ? 8 : width >= 380 ? 7 : width >= 340 ? 6 : 5;
@@ -434,32 +586,46 @@ export default function App() {
 
   useEffect(() => { load(false); }, [load]);
 
-  // Which sector each ticker sits in, so the readout can count the family
-  // members that live outside the tapped name's own sector.
+  const tiers = React.useMemo(() => tiersOf(data), [data]);
+  const active = tiers[Math.min(tab, tiers.length - 1)];
+  const skin = skinFor(active.key);
+  const t = { ...(dark ? DARK : LIGHT), ground: dark ? skin.ground.dark : skin.ground.light };
+
+  // Which sector and which list every ticker sits in. Peers cross both, so the
+  // readout can only count what is off-screen if it knows where everything is.
   const homeOf = React.useMemo(() => {
     const m = {};
-    data.sectors.forEach((s) => s.constituents.forEach((c) => { m[c.ticker] = s.name; }));
+    tiers.forEach((tier) =>
+      tier.sectors.forEach((s) =>
+        s.constituents.forEach((c) => { m[c.ticker] = { sector: s.name, tier: tier.key }; })
+      )
+    );
     return m;
-  }, [data]);
+  }, [tiers]);
 
   const choose = useCallback((sector, c, i) => {
     tapped();
     setPick((prev) => {
-      if (prev && prev.sector === sector.name && prev.ticker === c.ticker) return null;
+      if (prev && prev.tier === sector.tier && prev.ticker === c.ticker) return null;
       const kin = ((data.peers || {})[c.ticker] || []).map(([ticker, r]) => ({
-        ticker, r, sector: homeOf[ticker],
+        ticker,
+        r,
+        sector: (homeOf[ticker] || {}).sector,
+        tier: (homeOf[ticker] || {}).tier,
       }));
       // A lookup rather than a list: every cell on screen asks this question.
       const kinSet = {};
       kin.forEach((k) => { kinSet[k.ticker] = true; });
       return {
-        sector: sector.name, ticker: c.ticker, name: c.name, score: c.score,
-        place: i + 1, of: sector.n, kin, kinSet,
+        tier: sector.tier, sector: sector.name, ticker: c.ticker, name: c.name,
+        score: c.score, place: i + 1, of: sector.n, kin, kinSet,
       };
     });
   }, [data, homeOf]);
 
-  const peak = Math.max(...data.sectors.map((s) => Math.abs(s.score)));
+  const peak = Math.max(...active.sectors.map((s) => Math.abs(s.score)));
+  const elsewhere = pick && pick.tier !== active.key;
+  const kinHere = elsewhere ? pick.kin.filter((k) => k.tier === active.key).length : 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.ground }}>
@@ -481,13 +647,30 @@ export default function App() {
         </Text>
 
         <Freshness state={state} asOf={data.meta.asOf} asOfISO={data.meta.asOfISO} t={t} />
-        <Legend t={t} dark={dark} hue={data.sectors[0].hue} />
+
+        {tiers.length > 1 && (
+          <Tabs tiers={tiers} active={tiers.indexOf(active)} onPick={setTab} t={t} dark={dark} />
+        )}
+        <Text style={{ color: t.faint, fontSize: 11, marginTop: 7, lineHeight: 16 }}>
+          {active.note}
+        </Text>
+
+        <Legend
+          t={t}
+          dark={dark}
+          skin={skin}
+          hue={hueFor(skin, active.sectors[0].hue)}
+        />
 
         <View style={{ height: 14 }} />
 
+        {elsewhere && (
+          <CrossTier pick={pick} here={kinHere} t={t} onClear={() => { tapped(); setPick(null); }} />
+        )}
+
         <Details t={t} open={how} onToggle={() => setHow(!how)} meta={data.meta} />
 
-        {data.sectors.map((s) => (
+        {active.sectors.map((s) => (
           <SectorBlock
             key={s.name}
             s={s}
@@ -495,6 +678,7 @@ export default function App() {
             dark={dark}
             cols={cols}
             peak={peak}
+            skin={skin}
             pick={pick}
             onPick={choose}
           />
@@ -519,10 +703,10 @@ def build_data(payload: dict) -> dict:
     skip_days = config.MOM_9_1_SKIP_DAYS
     rho = (payload.get("benchmark") or {}).get("rank_correlation")
 
-    sectors = []
-    for s in payload["sectors"]:
+    def render_sector(s, tier_key, etfs):
         etf = etfs.get(s["sector"])
-        sectors.append({
+        return {
+            "tier": tier_key,
             "name": SHORT_NAMES.get(s["sector"], s["sector"]),
             "gloss": SECTOR_GLOSS.get(s["sector"], ""),
             "hue": SECTOR_HUE.get(s["sector"], "#7ad9c8"),
@@ -543,7 +727,19 @@ def build_data(payload: dict) -> dict:
                 }
                 for c in s["constituents"]
             ],
-        })
+        }
+
+    tiers = payload.get("tiers") or [
+        {"key": "top", "label": "Top 25", "note": "", "sectors": payload["sectors"]}
+    ]
+    by_tier = (payload.get("benchmark_by_tier") or {})
+    rendered = [
+        [
+            render_sector(s, tier["key"], (by_tier.get(tier["key"]) or {}).get("etfs") or etfs)
+            for s in tier["sectors"]
+        ]
+        for tier in tiers
+    ]
 
     details = [
         {
@@ -599,11 +795,15 @@ def build_data(payload: dict) -> dict:
         "meta": {
             "asOf": pretty_date(payload["as_of"]),
             "asOfISO": payload["as_of"],
+            "tiers": [
+                {"key": t["key"], "label": t["label"], "note": t["note"]}
+                for t in tiers
+            ],
             "blurb": (
-                f"{len(sectors)} corners of the US market, best first, by how steadily they "
+                f"{len(rendered[0])} corners of the US market, best first, by how steadily they "
                 f"climbed over nine months. Each sector has its own colour; the brighter a "
                 f"square, the stronger that company is inside it. Tap one to light up "
-                f"everything that moves with it."
+                f"everything that moves with it — including on the other list."
             ),
             "footer": (
                 "Prices from FMP, adjusted for splits and dividends. Information only — "
@@ -616,7 +816,10 @@ def build_data(payload: dict) -> dict:
             ),
             "details": details,
         },
-        "sectors": sectors,
+        # The first tier keeps the old top-level name so a bundle published
+        # before the split still finds something to render.
+        "sectors": rendered[0],
+        "sectors2": rendered[1] if len(rendered) > 1 else [],
         # [ticker, correlation] pairs, already sorted best first. Arrays rather
         # than objects: 273 names x 8 peers, and the keys would be half the bytes.
         "peers": {

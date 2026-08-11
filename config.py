@@ -82,7 +82,24 @@ SNAPSHOTS_INDEX_LIMIT = 20      # how many recent snapshots the report lists
 # Sector "ETFs": 25-name equal-weight sector indices, ranked on
 # volatility-adjusted 9-1 momentum (see sector_index.py).
 SECTOR_INDEX_SIZE           = 25        # constituents per synthetic sector ETF
-SECTOR_CANDIDATES_PER_SECTOR= 45        # screener shortlist before data-quality cuts
+SECTOR_CANDIDATES_PER_SECTOR= 95        # screener shortlist before data-quality cuts
+
+# Two rungs of the same ladder. Each sector's clean names are sorted by
+# liquidity and cut into consecutive blocks of SECTOR_INDEX_SIZE, so tier 2 is
+# the next 25 down rather than a different kind of company. Each tier is its
+# own equal-weight index, scored and ranked entirely within itself.
+SECTOR_TIERS = (
+    {
+        "key": "top",
+        "label": "Top 25",
+        "note": "the 25 most-traded companies in each sector",
+    },
+    {
+        "key": "next",
+        "label": "Next 25",
+        "note": "the 25 directly below those — same rules, one rung down",
+    },
+)
 SCREEN_MIN_MARKET_CAP       = 2_000_000_000
 SCREEN_MIN_VOLUME           = 300_000   # shares/day on the screener snapshot
 SCREEN_LIMIT                = 5000      # per-exchange screener page size

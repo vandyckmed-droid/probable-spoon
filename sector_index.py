@@ -183,12 +183,17 @@ def trading_calendar(closes: pd.DataFrame, min_coverage: float = 0.8) -> pd.Data
     return closes.loc[coverage >= min_coverage]
 
 
-def select_constituents(
+def clean_candidates(
     candidates: list[dict], closes: pd.DataFrame, volumes: pd.DataFrame
 ) -> tuple[list[dict], list[dict]]:
-    """(chosen, rejected) — the most liquid `SECTOR_INDEX_SIZE` clean names."""
+    """(clean, rejected) — every candidate that survives hygiene, most liquid first.
+
+    Selection stops here rather than cutting to a fixed size: the tiers are
+    consecutive slices of this one ranking, so they have to be cut from the
+    same sorted list or tier 2 would not be "the next 25" of anything.
+    """
     n_obs = len(closes.index)
-    chosen: list[dict] = []
+    clean: list[dict] = []
     rejected: list[dict] = []
     for rec in candidates:
         ticker = rec["ticker"]
@@ -202,14 +207,25 @@ def select_constituents(
         if adv <= 0:
             rejected.append({**rec, "reason": "no volume data"})
             continue
-        chosen.append({**rec, "median_dollar_volume": adv})
+        clean.append({**rec, "median_dollar_volume": adv})
 
-    chosen.sort(key=lambda r: -r["median_dollar_volume"])
-    keep = chosen[: config.SECTOR_INDEX_SIZE]
-    rejected += [
-        {**r, "reason": "below liquidity cut"}
-        for r in chosen[config.SECTOR_INDEX_SIZE :]
-    ]
+    clean.sort(key=lambda r: -r["median_dollar_volume"])
+    return clean, rejected
+
+
+def tier_slice(clean: list[dict], tier_index: int) -> list[dict]:
+    """The `tier_index`-th consecutive block of SECTOR_INDEX_SIZE names."""
+    size = config.SECTOR_INDEX_SIZE
+    return clean[tier_index * size : (tier_index + 1) * size]
+
+
+def select_constituents(
+    candidates: list[dict], closes: pd.DataFrame, volumes: pd.DataFrame
+) -> tuple[list[dict], list[dict]]:
+    """(chosen, rejected) — the most liquid `SECTOR_INDEX_SIZE` clean names."""
+    clean, rejected = clean_candidates(candidates, closes, volumes)
+    keep = tier_slice(clean, 0)
+    rejected += [{**r, "reason": "below liquidity cut"} for r in clean[len(keep):]]
     return keep, rejected
 
 
@@ -331,6 +347,39 @@ def correlated_peers(closes: pd.DataFrame, tickers: list[str]) -> dict[str, list
     return peers
 
 
+def _index_sector(sector: str, members: list[dict], closes: pd.DataFrame) -> dict | None:
+    """Chain one basket into an index and score it, or None if it cannot be."""
+    scored = score_constituents(closes, members)
+    tickers = [r["ticker"] for r in scored]
+    stats = vol_adjusted_9_1(equal_weight_index(closes[tickers]))
+    if stats is None:
+        return None
+    return {
+        "sector": sector,
+        "n_constituents": len(tickers),
+        **stats,
+        "median_dollar_volume": float(
+            np.median([r["median_dollar_volume"] for r in scored])
+        ),
+        "breadth": sum(1 for r in scored if (r.get("score") or 0.0) > 0) / len(scored),
+        "constituents": [
+            {
+                "ticker": r["ticker"],
+                "name": r["name"],
+                "industry": r["industry"],
+                "market_cap": r["market_cap"],
+                "median_dollar_volume": r["median_dollar_volume"],
+                "score": r.get("score"),
+                "sector_z": r.get("sector_z"),
+                "sector_rank": r.get("sector_rank"),
+                "ann_log_return": r.get("ann_log_return"),
+                "ann_vol": r.get("ann_vol"),
+            }
+            for r in scored
+        ],
+    }
+
+
 def build(*, force: bool = False, no_fetch: bool = False) -> dict:
     """Run the whole build and return the ranked result payload."""
     print("screening liquid universe...")
@@ -348,56 +397,35 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
     volumes = volumes.reindex(closes.index)
     print(f"  price panel: {closes.shape[1]} ticker(s) x {closes.shape[0]} day(s)")
 
-    sectors: list[dict] = []
+    tiers: list[dict] = [{**spec, "sectors": []} for spec in config.SECTOR_TIERS]
     for sector, candidates in buckets.items():
-        chosen, _rejected = select_constituents(candidates, closes, volumes)
-        if len(chosen) < config.SECTOR_INDEX_SIZE:
-            print(
-                f"  skipping {sector}: only {len(chosen)} clean name(s) "
-                f"of {len(candidates)} candidate(s)"
-            )
-            continue
-        chosen = score_constituents(closes, chosen)
-        members = [r["ticker"] for r in chosen]
-        levels = equal_weight_index(closes[members])
-        stats = vol_adjusted_9_1(levels)
-        if stats is None:
-            print(f"  skipping {sector}: scoring window unavailable")
-            continue
-        sectors.append({
-            "sector": sector,
-            "n_constituents": len(members),
-            **stats,
-            "median_dollar_volume": float(
-                np.median([r["median_dollar_volume"] for r in chosen])
-            ),
-            "breadth": sum(
-                1 for r in chosen if (r.get("score") or 0.0) > 0
-            ) / len(chosen),
-            "constituents": [
-                {
-                    "ticker": r["ticker"],
-                    "name": r["name"],
-                    "industry": r["industry"],
-                    "market_cap": r["market_cap"],
-                    "median_dollar_volume": r["median_dollar_volume"],
-                    "score": r.get("score"),
-                    "sector_z": r.get("sector_z"),
-                    "sector_rank": r.get("sector_rank"),
-                    "ann_log_return": r.get("ann_log_return"),
-                    "ann_vol": r.get("ann_vol"),
-                }
-                for r in chosen
-            ],
-        })
+        clean, _rejected = clean_candidates(candidates, closes, volumes)
+        for i, tier in enumerate(tiers):
+            members = tier_slice(clean, i)
+            # A short tier is skipped rather than padded: an 18-name basket is
+            # not comparable with a 25-name one on breadth or on index vol.
+            if len(members) < config.SECTOR_INDEX_SIZE:
+                print(
+                    f"  {sector} / {tier['label']}: only {len(members)} clean name(s) "
+                    f"of {len(clean)} — skipped"
+                )
+                continue
+            entry = _index_sector(sector, members, closes)
+            if entry is None:
+                print(f"  {sector} / {tier['label']}: scoring window unavailable")
+                continue
+            tier["sectors"].append(entry)
 
-    sectors.sort(key=lambda s: -s["score"])
-    for i, s in enumerate(sectors, 1):
-        s["rank"] = i
+    for tier in tiers:
+        tier["sectors"].sort(key=lambda s: -s["score"])
+        for i, s in enumerate(tier["sectors"], 1):
+            s["rank"] = i
 
-    chosen_tickers = [c["ticker"] for s in sectors for c in s["constituents"]]
-    print(f"correlating {len(chosen_tickers)} name(s)...")
-    peers = correlated_peers(closes, chosen_tickers)
+    # Correlation spans every name in every tier: the families that matter cut
+    # across the liquidity split as readily as they cut across sectors.
+    chosen = [c["ticker"] for t in tiers for s in t["sectors"] for c in s["constituents"]]
+    print(f"correlating {len(chosen)} name(s)...")
+    peers = correlated_peers(closes, chosen)
 
     return {
         "as_of": str(closes.index[-1].date()),
@@ -406,7 +434,8 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
             "index": f"{config.SECTOR_INDEX_SIZE}-name equal weight, daily rebalanced",
             "selection": (
                 f"most liquid by median {config.LIQUIDITY_WINDOW_DAYS}d dollar volume, "
-                f"market cap > ${config.SCREEN_MIN_MARKET_CAP/1e9:.0f}bn"
+                f"market cap > ${config.SCREEN_MIN_MARKET_CAP/1e9:.0f}bn, cut into "
+                f"{len(tiers)} consecutive tiers of {config.SECTOR_INDEX_SIZE}"
             ),
             "signal": (
                 f"annualised 9-1 log return / annualised vol, both over the same "
@@ -414,7 +443,10 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
                 f"(t-{config.MOM_9_1_LONG_DAYS}d to t-{config.MOM_9_1_SKIP_DAYS}d)"
             ),
         },
-        "sectors": sectors,
+        "tiers": tiers,
+        # The first tier stays at the top level under its old name so anything
+        # reading the previous payload shape keeps working.
+        "sectors": tiers[0]["sectors"],
         "peers": peers,
     }
 
@@ -422,7 +454,12 @@ def build(*, force: bool = False, no_fetch: bool = False) -> dict:
 # ----------------------------------------------------------------- output ----
 
 def print_table(payload: dict) -> None:
-    sectors = payload["sectors"]
+    for tier in payload["tiers"]:
+        print(f"== {tier['label']} — {tier['note']}")
+        _print_tier(tier["sectors"], payload["as_of"])
+
+
+def _print_tier(sectors: list[dict], as_of: str) -> None:
     if not sectors:
         print("no sectors ranked")
         return
@@ -434,7 +471,7 @@ def print_table(payload: dict) -> None:
     )
     print(
         f"window {first['window_start']} -> {first['window_end']} "
-        f"({first['window_obs']} obs), prices through {payload['as_of']}"
+        f"({first['window_obs']} obs), prices through {as_of}"
     )
     print()
     print(f"{'#':>2}  {'sector':<24}{'score':>8}{'ann ret':>10}{'ann vol':>9}"
@@ -453,12 +490,24 @@ def print_table(payload: dict) -> None:
 
 
 def benchmark(payload: dict) -> dict:
-    """Score the listed SPDR sector ETF on the same window, as a sanity check.
+    """Score each tier against the SPDR sector ETFs, as a sanity check.
 
-    The synthetic indices are equal weight over the 25 most liquid names, the
-    SPDRs are cap weighted over the full sector, so the levels legitimately
-    differ; the ranking should still broadly agree.
+    The synthetic indices are equal weight over 25 liquid names, the SPDRs are
+    cap weighted over the full sector, so the levels legitimately differ; the
+    ranking should still broadly agree. Tier 2 is expected to agree less — it
+    holds none of the names that dominate a cap-weighted fund — and that gap is
+    itself the reading.
     """
+    result = {}
+    for tier in payload["tiers"]:
+        print(f"\n== {tier['label']}")
+        result[tier["key"]] = _benchmark_tier(tier["sectors"])
+    payload["benchmark"] = result[payload["tiers"][0]["key"]]
+    payload["benchmark_by_tier"] = result
+    return result
+
+
+def _benchmark_tier(sectors: list[dict]) -> dict:
     from_date = (
         dt.date.today() - dt.timedelta(days=config.SECTOR_HISTORY_DAYS)
     ).isoformat()
@@ -466,7 +515,7 @@ def benchmark(payload: dict) -> dict:
     print("-" * 62)
     ours, theirs = [], []
     out: dict[str, dict] = {}
-    for s in payload["sectors"]:
+    for s in sectors:
         etf = SPDR_SECTOR_ETFS.get(s["sector"])
         if not etf:
             continue
@@ -487,9 +536,8 @@ def benchmark(payload: dict) -> dict:
     if len(ours) > 2:
         rank = lambda v: np.argsort(np.argsort(v))  # noqa: E731
         result["rank_correlation"] = float(np.corrcoef(rank(ours), rank(theirs))[0, 1])
-        print(f"\nrank correlation with the SPDR sector ETFs: "
+        print(f"rank correlation with the SPDR sector ETFs: "
               f"{result['rank_correlation']:.2f}")
-    payload["benchmark"] = result
     return result
 
 
@@ -507,13 +555,14 @@ def write_outputs(payload: dict) -> list[Path]:
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow([
-            "rank", "sector", "score", "ann_log_return", "ann_vol",
+            "tier", "rank", "sector", "score", "ann_log_return", "ann_vol",
             "log_return_9_1", "n_constituents", "median_dollar_volume",
             "window_start", "window_end",
         ])
-        for s in payload["sectors"]:
+        for tier in payload["tiers"]:
+          for s in tier["sectors"]:
             w.writerow([
-                s["rank"], s["sector"], f"{s['score']:.4f}",
+                tier["key"], s["rank"], s["sector"], f"{s['score']:.4f}",
                 f"{s['ann_log_return']:.6f}", f"{s['ann_vol']:.6f}",
                 f"{s['log_return_9_1']:.6f}", s["n_constituents"],
                 f"{s['median_dollar_volume']:.0f}",
@@ -525,15 +574,16 @@ def write_outputs(payload: dict) -> list[Path]:
     with open(members_path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow([
-            "sector", "sector_rank", "ticker", "name", "industry",
+            "tier", "sector", "sector_rank", "ticker", "name", "industry",
             "score", "sector_z", "ann_log_return", "ann_vol",
             "market_cap", "median_dollar_volume", "weight",
         ])
-        for s in payload["sectors"]:
+        for tier in payload["tiers"]:
+          for s in tier["sectors"]:
             weight = 1.0 / s["n_constituents"]
             for c in s["constituents"]:
                 w.writerow([
-                    s["sector"], c["sector_rank"], c["ticker"], c["name"],
+                    tier["key"], s["sector"], c["sector_rank"], c["ticker"], c["name"],
                     c["industry"],
                     "" if c["score"] is None else f"{c['score']:.4f}",
                     "" if c["sector_z"] is None else f"{c['sector_z']:.4f}",
@@ -563,9 +613,10 @@ def main() -> None:
     payload = build(force=args.force, no_fetch=args.no_fetch)
     print_table(payload)
     if args.members:
-        for s in payload["sectors"]:
-            names = ", ".join(c["ticker"] for c in s["constituents"])
-            print(f"{s['sector']}: {names}\n")
+        for tier in payload["tiers"]:
+            for s in tier["sectors"]:
+                names = ", ".join(c["ticker"] for c in s["constituents"])
+                print(f"{tier['key']} {s['sector']}: {names}\n")
     if args.benchmark:
         benchmark(payload)
         print()
