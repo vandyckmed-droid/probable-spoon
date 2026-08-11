@@ -195,14 +195,16 @@ def test_feed_and_baked_snapshot_are_the_same_object():
     assert baked == sector_snack.build_data(payload)
 
 
-def test_the_strip_reads_position_not_paint():
-    """Position carries magnitude, colour only direction — and it is clamped
-    so one freak name cannot squash everyone else onto the centre line."""
+def test_every_target_is_a_full_width_row():
+    """The chart is gone. No dot plot, no scrub surface, no axis maths — the
+    app is screens of rows, and a row is the only thing anyone presses."""
     src = sector_snack.render_app(_payload())
 
-    assert "const toneOf = (z, t) => (z === null || z === undefined ? t.faint : z < 0 ? t.neg : t.pos);" in src
-    assert "Math.max(-2.5, Math.min(2.5, z / 2.5))" in src   # position clamps at ±2.5σ
-    assert "hue" not in json.dumps(sector_snack.build_data(_payload())["sectors"][0])
+    for gone in ("function X(", "packLanes", "onResponderGrant", "locationX",
+                 "cellFill", "function mix(", "Strip", "MarketMap"):
+        assert gone not in src, gone
+    assert "function Row({ t, onPress, children, last })" in src
+    assert "paddingVertical: 13," in src                      # comfortable target
 
 
 def test_peers_ride_along_as_compact_pairs():
@@ -325,40 +327,43 @@ def test_global_z_is_a_different_yardstick_from_sector_z():
     assert any(c["g"] != c["z"] for c in everyone if c["g"] is not None)
 
 
-def test_scrub_selects_and_no_dot_is_a_tap_target():
-    """Nobody aims at an 8pt dot: the strip is one responder surface — press
-    anywhere, slide to the name, lift to keep it. Dots themselves swallow no
-    touches, and there is no long press anywhere."""
+def test_navigation_is_a_stack_the_back_button_pops():
+    """Three screens deep with a real back stack — including Android's
+    hardware button, which must pop rather than leave the app."""
     src = sector_snack.render_app(_payload())
 
-    assert "onResponderGrant={scrub}" in src
-    assert "onResponderMove={scrub}" in src
-    assert "onResponderRelease={onSettle}" in src
-    assert "onResponderTerminationRequest={() => false}" in src   # the scroll view may not steal a scrub
-    assert "e.nativeEvent.locationX" in src
-    assert "onPress={() => onPick(s, c, p.i)}" not in src         # the old per-dot tap is gone
-    assert "onLongPress" not in src
-    assert "delayLongPress" not in src
-    assert "'On watchlist — tap to remove' : 'Add to watchlist'" in src
+    assert "const [stack, setStack] = useState([{ k: 'sectors' }]);" in src
+    assert "BackHandler.addEventListener('hardwareBackPress'" in src
+    assert "if (stack.length > 1) { pop(); return true; }" in src
+    for screen in ("SectorsScreen", "SectorScreen", "CompanyScreen",
+                   "WatchlistScreen", "HowScreen"):
+        assert "function " + screen in src, screen
+    assert "onLongPress" not in src                        # one gesture: press a row
 
 
-def test_scrub_settle_keeps_the_name_instead_of_toggling():
-    """Sliding back to the already-picked name must not deselect it — only a
-    deliberate row tap toggles."""
+def test_a_push_lands_at_the_top_of_the_new_screen():
+    """Keying the scroller by screen remounts it, so a pushed screen never
+    opens halfway down the previous one's scroll position."""
     src = sector_snack.render_app(_payload())
 
-    assert "onPick(s, placed[k].c, placed[k].i, true)" in src
-    assert "if (!keep && prev && prev.tier === sector.tier && prev.ticker === c.ticker) return null;" in src
+    assert "key={here.k + ':' + (here.ticker || here.name || '')}" in src
+
+
+def test_fresh_numbers_drop_you_back_to_the_top_screen():
+    """The open screens describe the old numbers; a refresh invalidates them."""
+    src = sector_snack.render_app(_payload(), feed_url="https://example.test/f.json")
+
+    assert "setStack([{ k: 'sectors' }]);" in src
 
 
 def test_no_tinted_fills_anywhere():
-    """The pea-soup rule: the palette appears only at full strength on small
-    marks. Nothing on screen blends the accent into a surface."""
+    """The pea-soup rule survives the rewrite: the palette appears only at
+    full strength on type and hairlines, never blended into a surface."""
     src = sector_snack.render_app(_payload())
 
     assert "cellFill" not in src
     assert "function mix(" not in src
-    assert "function packLanes(" in src                       # dots stack, not shade
+    assert "backgroundColor: toneOf(value, t)" in src         # the 3pt bar, at full strength
 
 
 def test_watchlist_survives_restarts_and_storage_failures():
@@ -370,9 +375,39 @@ def test_watchlist_survives_restarts_and_storage_failures():
     assert ".catch(() => {}); } catch (e) {}" in src
 
 
-def test_the_two_views_share_one_axis():
-    """Both views place dots through X(); only the z they feed it differs."""
+def test_standing_is_told_in_words_not_a_mode_switch():
+    """The old by-sector/whole-market toggle is gone: a company screen simply
+    states both ranks in a sentence, so there is no mode to be lost in."""
     src = sector_snack.render_app(_payload())
 
-    assert "const zOf = view === 'global' ? (c) => c.g : (c) => c.z;" in src
-    assert src.count("function X(") == 1
+    assert "ViewToggle" not in src
+    assert "' of ' + c.of + ' in ' + home.sector" in src
+    assert "' of ' + c.universe + ' across every sector'" in src
+
+def test_the_score_is_translated_into_plain_words():
+    """A reader should never have to know that 0.75 is 'good' — the row says
+    so. Coarse buckets on purpose: five phrases, not a continuous scale."""
+    assert sector_snack.verdict_for(2.10) == "climbing hard"
+    assert sector_snack.verdict_for(1.00) == "climbing steadily"
+    assert sector_snack.verdict_for(0.40) == "drifting up"
+    assert sector_snack.verdict_for(0.00) == "going nowhere"
+    assert sector_snack.verdict_for(-0.50) == "drifting down"
+    assert sector_snack.verdict_for(-1.20) == "falling"
+
+    data = sector_snack.build_data(_payload())
+    assert all(s["verdict"] for s in data["sectors"])
+
+
+def test_a_sector_row_says_what_happened_without_the_number():
+    """Rank, name, verdict, breadth — the row reads even with the score and
+    the bar ignored entirely."""
+    src = sector_snack.render_app(_payload())
+
+    assert "{s.verdict} · {s.rising} of {s.n} companies up" in src
+
+
+def test_unscored_names_are_listed_and_explained_not_hidden():
+    src = sector_snack.render_app(_payload())
+
+    assert "too new to score" in src
+    assert "it has not been listed long enough" in src

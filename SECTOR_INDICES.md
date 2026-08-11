@@ -29,7 +29,7 @@ than either 25-name tier did (rank correlation 0.83).
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/NtFwwasb2seIIRXCIE7jV** — open it in Expo
+**Live link: https://snack.expo.dev/Nn44oLRTEfVMjdcpEU6pQ** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -47,55 +47,43 @@ twice. `--publish` is the other thing entirely — it re-uploads the app's code
 and mints a new link, stranding whatever link the user has saved, so it belongs
 only to a code change.
 
-The heatmap is gone. Two builds shaded ticker cells with tinted fills and both
-failed the same way: blending acid green into a dark surface reads as washed-out
-pea soup, and a wall of 550 equal cells asks the reader to decode colour — the
-weakest visual channel — for names that are mostly mid-pack noise anyway. The
-user called it, and the replacement moves every magnitude onto *position*:
+There is no chart. Three builds tried to visualise 550 names on a phone — a
+tinted heatmap, a dot strip, then a scrubbable dot strip — and all three failed
+the same way for the same reason: they were dashboards, asking the reader to
+decode a legend and work a gesture before learning anything. The user's verdict
+after the third ("I want a totally 100% new front end") retired the idea, not
+the details.
 
-- **Market map first.** All sectors as rows with bars on one shared axis, so
-  the page answers its own question before any scrolling. The axis adapts: an
-  all-positive market runs bars from the left edge; mixed signs put the zero
-  line where zero really is. Tapping a row jumps to that sector's card.
-- **A dot strip per sector.** Every company is one full-saturation dot placed
-  by its z on a horizontal axis — centre line, hairlines at ±1.5σ, colliding
-  dots stacking downward into lanes (`packLanes`). Density reads as shape: a
-  clump left with three dots far right *is* "carried by a few names". Position
-  is clamped at ±2.5σ so one freak name cannot squash the rest onto the line.
-- **The tails named outright.** The three best and three worst appear as rows —
-  place, ticker, name, a thin bar, the score — because those are the names a
-  reader actually wants; the middle is on the strip as shape, a finger-slide
-  away. A ★ marks watched names in the rows.
+What replaced it is an ordinary drill-down app. Five screens, a real back
+stack, and every target a full-width row:
 
-The palette rule that fell out of this: **the accent colours appear only at
-full strength on small marks** — dots, 3–4pt bars, numbers — and never as a
-tinted area fill. `cellFill`/`mix` are deleted; a test now enforces their
-absence. Colour carries direction only; position carries magnitude.
+- **Sectors** — eleven rows: rank, name, the score *in plain words*
+  ("climbing hard", "drifting up", "going nowhere", "falling"), how many of its
+  companies rose, the number, and a hairline for size. The row reads correctly
+  with the number and the bar ignored entirely.
+- **One sector** — a paragraph of plain English (what it holds, what it did,
+  the real SPDR fund's score for comparison), then every company as a ranked
+  list. Deliberately boring: fifty rows scroll in a second.
+- **One company** — its score, its standing stated as a sentence ("1st of 50 in
+  Technology, and 2nd of 548 across every sector"), a watch button, and its
+  correlation family as rows that navigate onward.
+- **Watchlist** and **How this works** hang off the first screen.
 
-### Views, watchlist and gestures
+`verdict_for()` in the build does the translation, in five coarse buckets a
+person can hold in their head rather than a continuous scale nobody can read.
+The by-sector/whole-market toggle is gone with the chart: a company screen just
+states both ranks in a sentence, so there is no mode to get lost in.
 
-The strips place dots on one of two yardsticks, switched by a segmented
-control: "By sector" uses the within-sector z, "Whole market" uses `g`, the
-same score z-scored across every name on the page. Both feed the same `X()`
-position function — a test asserts there is exactly one.
+The palette rule survives from the chart era, because it was the one part that
+was right: **the accent colours appear only at full strength** on type and on
+3pt hairlines, never blended into a surface as an area fill. `cellFill`/`mix`
+stay deleted and a test enforces their absence.
 
-Nobody taps a dot. Tapping an 8-point target shipped for one build and the
-user's verdict — "just terrible, not effortless" — was correct, so the strip
-became one responder surface instead: press anywhere and slide, and the
-nearest name selects itself under the finger, one haptic tick per name, a
-live ticker-and-score label above the dots and a steady one-line readout
-below them (fixed height, so scrubbing never makes the page jump). Lifting
-settles the selection, lights its correlation family and offers the watch
-toggle; a tap is a zero-length slide, so nothing needs aiming. Scrubbing
-left-to-right walks the sector worst-to-best in rank order. The strip claims
-the gesture (`onResponderTerminationRequest: false`) — the page scrolls from
-anywhere else, exactly the trade the iOS Stocks chart makes. Row taps still
-select directly, and a settle never toggles a name off where a repeated row
-tap does. Unrelated dots dim while a family is lit; kin dots ring in the
-bright accent, the live or chosen dot rings in ink and grows a step. Watched names keep an ink ring on their dot, a ★ in the rows,
-and appear as removable chips in a card above the map. The list persists via
-`@react-native-async-storage/async-storage`; storage failures degrade to
-in-memory, never to a crash.
+Navigation is a `stack` array of screen descriptors — push, pop, and Android's
+hardware back button pops it rather than leaving the app. The scroller is keyed
+by screen so a push lands at the top of the new screen instead of halfway down
+the last one, and fresh numbers arriving from the feed reset the stack, because
+the open screens described the old ones.
 
 ### Why the numbers are fetched, not baked
 

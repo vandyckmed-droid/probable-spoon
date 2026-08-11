@@ -1,12 +1,9 @@
 """Emit the sector ranking as an Expo Snack app and publish it.
 
-Each tier renders as sector cards, each wrapping its 25 tickers into a grid
-sized to the screen and shaded on the same within-sector z — one restrained
-diverging scale (teal leading, rust lagging), one design system across both
-tiers and both colour schemes. Tapping a cell names the company and lights its
-correlation family; labels are plain words with the maths behind a "How this
-works" panel. The numbers are fetched at run time with the published snapshot
-as the offline fallback.
+The phone build is an ordinary drill-down app, not a chart: a list of sectors,
+tap one for its companies, tap one of those for its detail and its correlation
+family. Every target is a full-width row. The numbers are fetched at run time
+with the published snapshot as the offline fallback.
 
     python3 sector_snack.py              # write out/sector_feed.json + out/App.js
     python3 sector_snack.py --push-feed  # ...and publish the numbers (a refresh)
@@ -38,6 +35,26 @@ SHORT_NAMES = {
     "Basic Materials": "Materials",
 }
 
+# The score in plain words. The reader should never have to know that 0.75 is
+# "good" — the row says so. Thresholds are deliberately coarse: five buckets a
+# person can hold in their head, not a continuous scale nobody can read.
+VERDICTS = (
+    (1.50, "climbing hard"),
+    (0.75, "climbing steadily"),
+    (0.25, "drifting up"),
+    (-0.25, "going nowhere"),
+    (-0.75, "drifting down"),
+)
+VERDICT_FLOOR = "falling"
+
+
+def verdict_for(score: float) -> str:
+    for cut, phrase in VERDICTS:
+        if score >= cut:
+            return phrase
+    return VERDICT_FLOOR
+
+
 # Plain-word gloss for each sector, so the list reads without a finance degree.
 SECTOR_GLOSS = {
     "Technology": "chips, software, hardware",
@@ -54,10 +71,10 @@ SECTOR_GLOSS = {
 }
 
 APP_TEMPLATE = r"""
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaView, ScrollView, View, Text, Pressable, useColorScheme,
-  StatusBar, Platform, RefreshControl, useWindowDimensions,
+  StatusBar, Platform, RefreshControl, BackHandler,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -84,28 +101,25 @@ const BAKED = __DATA__;
 const FEED = __FEED__;
 
 /**
- * One design system, both colour schemes, brokerage-dark first. The palette
- * appears only at full strength — dots, bars, numbers — never as a tinted
- * area fill: blending acid green into a dark surface is how the old build
- * turned to pea soup. Position carries magnitude now; colour only carries
- * direction. Light mode keeps the same vocabulary with the green pulled down
- * to hold contrast on white.
+ * Brokerage-dark first, acid green leading and signal orange lagging — the
+ * user's standing palette. It appears only at full strength on type and on
+ * hairline bars; nothing is ever a tinted area fill.
  */
 const LIGHT = {
-  ground: '#fafbf8', surface: '#ffffff', ink: '#151a12', muted: '#5a6357',
-  faint: '#8a9385', rule: '#e2e6dc', ruleSoft: '#eef1e8',
+  ground: '#f4f6f2', surface: '#ffffff', ink: '#151a12', muted: '#5a6357',
+  faint: '#8a9385', rule: '#e2e6dc', ruleSoft: '#edf0e9',
   pos: '#4f9c00', neg: '#d9542e', accent: '#3e7d00',
 };
 const DARK = {
-  ground: '#0a0c0a', surface: '#131613', ink: '#eef2ea', muted: '#9aa596',
-  faint: '#6c7568', rule: '#242923', ruleSoft: '#1a1e19',
+  ground: '#0a0c0a', surface: '#141714', ink: '#eef2ea', muted: '#9aa596',
+  faint: '#6c7568', rule: '#252a24', ruleSoft: '#1b1f1a',
   pos: '#9fe519', neg: '#ff6a45', accent: '#ccff5e',
 };
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
 
 const pct = (x) => (x === null || x === undefined ? '—' : Math.round(x * 100) + '%');
-const signed = (x) => (x >= 0 ? '+' : '') + x.toFixed(2);
+const signed = (x) => (x === null || x === undefined ? '—' : (x >= 0 ? '+' : '') + x.toFixed(2));
 
 function ordinal(n) {
   const tail = ['th', 'st', 'nd', 'rd'];
@@ -113,576 +127,94 @@ function ordinal(n) {
   return n + (tail[(v - 20) % 10] || tail[v] || tail[0]);
 }
 
-const toneOf = (z, t) => (z === null || z === undefined ? t.faint : z < 0 ? t.neg : t.pos);
-
-// ---- the strip plot ---------------------------------------------------------
-
-const DOT = 8;        // dot diameter
-const LANE = 11;      // vertical pitch between stacked dots
-const MAX_LANES = 6;  // beyond this the mid-pack may overlap; that reads as density
+const toneOf = (v, t) => (v === null || v === undefined ? t.faint : v < 0 ? t.neg : t.pos);
 
 /**
- * Position along the axis for a z-score. Clamped at ±2.5σ so one freak name
- * cannot squash everyone else onto the centre line; 47 keeps the outermost
- * dot inside the track.
+ * A hairline under a row: length is the number's size against the biggest on
+ * the screen, colour its direction. It sits behind the type as texture — the
+ * row is readable with the bar ignored entirely.
  */
-function X(z) {
-  const c = Math.max(-2.5, Math.min(2.5, z / 2.5));
-  return 50 + c * 47;
-}
-
-/**
- * Stack colliding dots into lanes, greedily: each dot takes the first lane
- * with room, and when every lane is crowded it takes the least-crowded one
- * and accepts the overlap. Items must arrive sorted by x.
- */
-function packLanes(items, plotW) {
-  const minGap = plotW > 0 ? ((DOT + 2) / plotW) * 100 : 4;
-  const last = [];
-  return items.map((it) => {
-    let lane = last.findIndex((x) => it.x - x >= minGap);
-    if (lane === -1) {
-      if (last.length < MAX_LANES) { lane = last.length; last.push(it.x); }
-      else {
-        let best = 0;
-        for (let i = 1; i < last.length; i++) if (last[i] < last[best]) best = i;
-        lane = best; last[best] = it.x;
-      }
-    } else {
-      last[lane] = it.x;
-    }
-    return lane;
-  });
-}
-
-/**
- * Every company in the sector as one dot on a shared axis: right of the
- * centre line leading, left lagging, distance is strength.
- *
- * Nobody taps an 8-point dot. The strip is one touch surface: press anywhere
- * and slide, and the nearest name selects itself under the finger — a tick of
- * haptic per name, a live label above the dots, the readout below following
- * along. Lifting settles the selection and lights its family. A tap is just
- * a zero-length slide, so nothing on this screen ever needs aiming.
- */
-const TIP = 20;   // label lane above the dots
-
-function Strip({ s, t, placed, plotW, pick, wl, live, onLive, onSettle }) {
-  const laneOf = packLanes(placed, plotW);
-  const laneCount = Math.max(...laneOf, 0) + 1;
-  const height = TIP + laneCount * LANE + DOT;
-
-  const nearest = (px) => {
-    const xp = (px / (plotW || 1)) * 100;
-    let best = 0;
-    let gap = Infinity;
-    for (let i = 0; i < placed.length; i++) {
-      const d = Math.abs(placed[i].x - xp);
-      if (d < gap) { gap = d; best = i; }
-    }
-    return best;
-  };
-  const scrub = (e) => onLive(nearest(e.nativeEvent.locationX));
-  const liveDot = live === null ? null : placed[live];
-
+function Bar({ value, peak, t, width }) {
+  const frac = value === null || value === undefined ? 0 : Math.min(Math.abs(value) / (peak || 1), 1);
   return (
-    <View
-      testID={'strip-' + s.name}
-      style={{ height, marginTop: 6 }}
-      onStartShouldSetResponder={() => true}
-      onMoveShouldSetResponder={() => true}
-      onResponderTerminationRequest={() => false}
-      onResponderGrant={scrub}
-      onResponderMove={scrub}
-      onResponderRelease={onSettle}
-    >
-      {/* centre line and the ±1.5σ hairlines give the dots their scale */}
-      <View pointerEvents="none" style={{ position: 'absolute', left: X(-1.5) + '%', top: TIP, bottom: 0, width: 1, backgroundColor: t.ruleSoft }} />
-      <View pointerEvents="none" style={{ position: 'absolute', left: X(1.5) + '%', top: TIP, bottom: 0, width: 1, backgroundColor: t.ruleSoft }} />
-      <View pointerEvents="none" style={{ position: 'absolute', left: '50%', top: TIP, bottom: 0, width: 1, backgroundColor: t.rule }} />
-      {placed.map((p, k) => {
-        const c = p.c;
-        const unscored = p.z === null || p.z === undefined;
-        const isLive = live === k;
-        const chosen = !isLive && pick && pick.ticker === c.ticker && pick.sector === s.name && pick.tier === s.tier;
-        const kin = pick && pick.kinSet[c.ticker];
-        const dim = (pick || live !== null) && !isLive && !chosen && !kin;
-        const grow = isLive || chosen;
-        const ring = isLive || chosen ? t.ink : kin ? t.accent : wl[c.ticker] ? t.ink : 'transparent';
-        return (
-          <View
-            key={c.ticker}
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              left: p.x + '%',
-              top: TIP + laneOf[k] * LANE + (grow ? 0 : 1),
-              marginLeft: -(DOT / 2) - (grow ? 1 : 0),
-              opacity: dim ? 0.3 : 1,
-            }}
-          >
-            <View
-              style={{
-                width: DOT + (grow ? 2 : 0),
-                height: DOT + (grow ? 2 : 0),
-                borderRadius: DOT,
-                backgroundColor: unscored ? 'transparent' : toneOf(p.z, t),
-                borderWidth: unscored ? 1 : grow || kin || wl[c.ticker] ? 1.5 : 0,
-                borderColor: unscored ? t.faint : ring,
-              }}
-            />
-          </View>
-        );
-      })}
-      {liveDot && (
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: Math.max(11, Math.min(89, liveDot.x)) + '%',
-            top: 0,
-            marginLeft: -44,
-            width: 88,
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11, fontWeight: '700' }}>
-            {liveDot.c.ticker}{liveDot.c.score === null ? '' : '  ' + signed(liveDot.c.score)}
-          </Text>
-        </View>
-      )}
+    <View style={{ height: 3, borderRadius: 2, backgroundColor: t.ruleSoft, width: width || '100%', marginTop: 8 }}>
+      <View style={{ height: 3, borderRadius: 2, width: frac * 100 + '%', backgroundColor: toneOf(value, t) }} />
     </View>
   );
 }
 
-/** One named company: place, ticker, name, a thin bar sized like its dot. */
-function NameRow({ c, place, t, zOf, pick, wl, onPress }) {
-  const z = zOf(c);
-  const tone = toneOf(c.score === null ? null : z, t);
-  const frac = z === null || z === undefined ? 0 : Math.min(Math.abs(z) / 2.5, 1);
-  const dim = pick && !pick.kinSet[c.ticker] && pick.ticker !== c.ticker;
+/** A screen-wide press target. Every interaction in this app is one of these. */
+function Row({ t, onPress, children, last }) {
   return (
-    <Pressable onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4.5, opacity: dim ? 0.35 : 1 }}>
-      <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 10, width: 22 }}>{place}</Text>
-      <Text style={{ color: pick && pick.ticker === c.ticker ? t.accent : t.ink, fontFamily: MONO, fontSize: 11.5, width: 52 }}>
-        {c.ticker}
-      </Text>
-      <Text numberOfLines={1} style={{ color: t.muted, fontSize: 11.5, flex: 1, marginRight: 8 }}>
-        {c.name}{wl[c.ticker] ? ' ★' : ''}
-      </Text>
-      <View style={{ width: 54, height: 3, borderRadius: 2, backgroundColor: t.ruleSoft, marginRight: 8 }}>
-        <View style={{ width: frac * 100 + '%', height: 3, borderRadius: 2, backgroundColor: tone, alignSelf: z < 0 ? 'flex-end' : 'flex-start' }} />
-      </View>
-      <Text style={{ color: c.score === null ? t.faint : tone, fontFamily: MONO, fontSize: 11.5, width: 44, textAlign: 'right' }}>
-        {c.score === null ? '—' : signed(c.score)}
-      </Text>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        paddingHorizontal: 16,
+        paddingVertical: 13,
+        backgroundColor: pressed ? t.ruleSoft : t.surface,
+        borderBottomWidth: last ? 0 : 1,
+        borderBottomColor: t.ruleSoft,
+      })}
+    >
+      {children}
     </Pressable>
   );
 }
 
-/**
- * What the selected name is, and how much of its family lives outside its own
- * sector — the number that makes the cross-sector highlighting worth having.
- */
-function Readout({ p, t, watched, onWatch }) {
-  const tone = p.score === null ? t.muted : p.score < 0 ? t.neg : t.pos;
-  const away = p.kin.filter((k) => k.sector !== p.sector).length;
-  const family = p.kin.length
-    ? p.kin.length + ' move with it' + (away ? ', ' + away + ' outside this sector' : '')
-    : 'nothing else moves closely with it';
-
-  return (
-    <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: t.ruleSoft }}>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-        <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11.5, fontWeight: '700' }}>
-          {p.ticker}
-        </Text>
-        <Text style={{ color: t.muted, fontSize: 11.5, flex: 1, marginLeft: 8 }} numberOfLines={1}>
-          {p.name}
-        </Text>
-        <Text style={{ color: t.faint, fontSize: 10, marginLeft: 6 }}>
-          {p.score === null ? 'unscored' : ordinal(p.place) + ' of ' + p.of}
-        </Text>
-        <Text style={{ color: tone, fontFamily: MONO, fontSize: 11.5, marginLeft: 8 }}>
-          {p.score === null ? '—' : signed(p.score)}
-        </Text>
-      </View>
-      <Text style={{ color: t.faint, fontSize: 10.5, marginTop: 3, lineHeight: 15 }} numberOfLines={2}>
-        {family}
-        {p.kin.length ? ' · ' + p.kin.map((k) => k.ticker).join(' ') : ''}
-      </Text>
-      <Pressable
-        onPress={onWatch}
-        style={{
-          alignSelf: 'flex-start',
-          borderWidth: 1,
-          borderColor: t.accent,
-          borderRadius: 6,
-          paddingVertical: 4,
-          paddingHorizontal: 10,
-          marginTop: 8,
-        }}
-      >
-        <Text style={{ color: t.accent, fontSize: 11.5, fontWeight: '600' }}>
-          {watched ? 'On watchlist — tap to remove' : 'Add to watchlist'}
-        </Text>
-      </Pressable>
-    </View>
-  );
-}
-
-/**
- * One sector: header, plain-words stats, the strip of everyone, then the
- * three best and three worst by name. The middle of a ranked-within-sector
- * list is undifferentiated by construction — it belongs on the strip as
- * shape, not in a table pretending every row matters equally.
- */
-function SectorCard({ s, t, plotW, pick, zOf, wl, onPick, onWatch, onLayout }) {
-  const tone = s.score < 0 ? t.neg : t.pos;
-  // The x-sorted dots: scrubbing left to right walks the sector best-to-worst
-  // (or the reverse), one haptic tick per name.
-  const placed = React.useMemo(
-    () =>
-      s.constituents
-        .map((c, i) => ({ c, i, z: zOf(c), x: X(zOf(c) === null || zOf(c) === undefined ? 0 : zOf(c)) }))
-        .sort((a, b) => a.x - b.x),
-    [s, zOf]
-  );
-  const [live, setLive] = useState(null);
-  const scored = s.constituents.filter((c) => c.score !== null);
-  const head = scored.slice(0, 3);
-  const tail = scored.slice(-3);
-  const hidden = scored.length - head.length - tail.length;
-  const mine = pick && pick.sector === s.name && pick.tier === s.tier ? pick : null;
-
-  const onLive = (k) => {
-    setLive((prev) => {
-      if (prev !== k) tapped();
-      return k;
-    });
-  };
-  const onSettle = () => {
-    setLive((k) => {
-      if (k !== null) onPick(s, placed[k].c, placed[k].i, true);
-      return null;
-    });
-  };
-
-  const liveDot = live === null ? null : placed[live];
-
-  return (
-    <View
-      onLayout={onLayout}
-      style={{
-        backgroundColor: t.surface,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: t.ruleSoft,
-        paddingHorizontal: 12,
-        paddingVertical: 11,
-        marginBottom: 10,
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-        <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 11, width: 20 }}>{s.rank}</Text>
-        <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600', flex: 1 }}>{s.name}</Text>
-        <Text style={{ color: tone, fontFamily: MONO, fontSize: 15, fontWeight: '700' }}>
-          {signed(s.score)}
-        </Text>
-      </View>
-
-      <Text numberOfLines={1} style={{ color: t.faint, fontSize: 10.5, marginLeft: 20, marginTop: 2 }}>
-        {s.gloss} · {pct(s.ret)}/yr · swing {pct(s.vol)} · {s.rising}/{s.n} up
-        {s.etf ? ' · ' + s.etf + ' ' + signed(s.etfScore) : ''}
-      </Text>
-
-      <Strip
-        s={s}
-        t={t}
-        placed={placed}
-        plotW={plotW}
-        pick={pick}
-        wl={wl}
-        live={live}
-        onLive={onLive}
-        onSettle={onSettle}
-      />
-
-      {/* One steady line under the strip: the hint, then whatever the finger
-          is on. Fixed height, so scrubbing never makes the page jump. */}
-      <View style={{ height: 18, justifyContent: 'center' }}>
-        {liveDot ? (
-          <Text numberOfLines={1} style={{ color: t.muted, fontSize: 11 }}>
-            <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11 }}>{liveDot.c.ticker}</Text>
-            {'  ' + liveDot.c.name}
-            {liveDot.c.score === null
-              ? '  ·  unscored'
-              : '  ·  ' + ordinal(1 + placed.filter((q) => q.z !== null && q.z > liveDot.z).length) + ' of ' + scored.length}
-          </Text>
-        ) : (
-          <Text style={{ color: t.faint, fontSize: 10.5 }}>
-            Press the dots and slide — every name introduces itself. Lift to keep one.
-          </Text>
-        )}
-      </View>
-
-      <View style={{ marginTop: 4 }}>
-        {head.map((c, i) => (
-          <NameRow key={c.ticker} c={c} place={i + 1} t={t} zOf={zOf} pick={pick} wl={wl}
-            onPress={() => onPick(s, c, s.constituents.indexOf(c))} />
-        ))}
-        {hidden > 0 && (
-          <Text style={{ color: t.faint, fontSize: 10, textAlign: 'center', paddingVertical: 3 }}>
-            · {hidden} more between them, on the strip above ·
-          </Text>
-        )}
-        {hidden > -3 && tail.map((c, i) => (
-          <NameRow key={c.ticker} c={c} place={scored.length - tail.length + i + 1} t={t} zOf={zOf}
-            pick={pick} wl={wl} onPress={() => onPick(s, c, s.constituents.indexOf(c))} />
-        ))}
-      </View>
-
-      {mine && (
-        <Readout
-          p={mine}
-          t={t}
-          watched={!!wl[mine.ticker]}
-          onWatch={() => onWatch({ ticker: mine.ticker })}
-        />
-      )}
-    </View>
-  );
-}
-
-/**
- * Every sector on one axis — the first thing on screen answers the page's
- * question before any scrolling. Rows jump to their card.
- */
-function MarketMap({ sectors, t, onJump }) {
-  // The axis adapts to the data: an all-positive quarter runs the bars from
-  // the left edge instead of parking half the row behind an empty negative
-  // side; when signs are mixed the zero line moves to where zero really is.
-  const lo = Math.min(0, ...sectors.map((s) => s.score));
-  const hi = Math.max(0, ...sectors.map((s) => s.score));
-  const span = hi - lo || 1;
-  const zero = ((0 - lo) / span) * 100;
+/** The grouped-list container: one card, rows inside it, iOS-style. */
+function Card({ t, children, style }) {
   return (
     <View
       style={{
         backgroundColor: t.surface,
-        borderRadius: 10,
+        borderRadius: 12,
         borderWidth: 1,
-        borderColor: t.ruleSoft,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        marginTop: 14,
-        marginBottom: 10,
+        borderColor: t.rule,
+        overflow: 'hidden',
+        ...(style || {}),
       }}
     >
-      {sectors.map((s) => {
-        const tone = s.score < 0 ? t.neg : t.pos;
-        const frac = (Math.abs(s.score) / span) * 100;
-        return (
-          <Pressable
-            key={s.name}
-            onPress={() => { tapped(); onJump(s.name); }}
-            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4.5 }}
-          >
-            <Text numberOfLines={1} style={{ color: t.ink, fontSize: 12, width: 118 }}>{s.name}</Text>
-            <View style={{ flex: 1, height: 12, justifyContent: 'center' }}>
-              <View style={{ position: 'absolute', left: zero + '%', top: 0, bottom: 0, width: 1, backgroundColor: t.rule }} />
-              <View
-                style={{
-                  position: 'absolute',
-                  height: 4,
-                  borderRadius: 2,
-                  backgroundColor: tone,
-                  width: frac + '%',
-                  left: (s.score < 0 ? zero - frac : zero) + '%',
-                }}
-              />
-            </View>
-            <Text style={{ color: tone, fontFamily: MONO, fontSize: 11.5, width: 46, textAlign: 'right' }}>
-              {signed(s.score)}
-            </Text>
-          </Pressable>
-        );
-      })}
-      <Text style={{ color: t.faint, fontSize: 10, marginTop: 6 }}>
-        Steady-climb score, nine months. Tap a sector to jump to its companies.
-      </Text>
+      {children}
     </View>
   );
 }
 
-/** Same score, two yardsticks: a name against its sector, or against everyone. */
-function ViewToggle({ view, onPick, t }) {
-  const opts = [
-    { k: 'sector', label: 'By sector' },
-    { k: 'global', label: 'Whole market' },
-  ];
+function GroupLabel({ t, children, right }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: 22, marginBottom: 7, paddingHorizontal: 4 }}>
+      <Text style={{ color: t.faint, fontSize: 11.5, letterSpacing: 0.7, textTransform: 'uppercase', flex: 1 }}>
+        {children}
+      </Text>
+      {right ? <Text style={{ color: t.faint, fontSize: 11.5 }}>{right}</Text> : null}
+    </View>
+  );
+}
+
+/** The bar every screen but the first carries: back, title, optional action. */
+function NavBar({ t, title, onBack, action }) {
   return (
     <View
-      style={{
-        flexDirection: 'row',
-        backgroundColor: t.ruleSoft,
-        borderRadius: 9,
-        padding: 3,
-        marginTop: 10,
-      }}
-    >
-      {opts.map((o) => {
-        const on = view === o.k;
-        return (
-          <Pressable
-            key={o.k}
-            onPress={() => { if (!on) { tapped(); onPick(o.k); } }}
-            style={{
-              flex: 1,
-              paddingVertical: 6,
-              alignItems: 'center',
-              borderRadius: 7,
-              backgroundColor: on ? t.surface : 'transparent',
-              borderWidth: 1,
-              borderColor: on ? t.rule : 'transparent',
-            }}
-          >
-            <Text style={{ color: on ? t.ink : t.faint, fontSize: 12.5, fontWeight: '600' }}>
-              {o.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-function Legend({ t, view }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
-      <View style={{ width: DOT, height: DOT, borderRadius: DOT, backgroundColor: t.pos, marginRight: 5 }} />
-      <Text style={{ color: t.faint, fontSize: 10.5, marginRight: 10 }}>leading</Text>
-      <View style={{ width: DOT, height: DOT, borderRadius: DOT, backgroundColor: t.neg, marginRight: 5 }} />
-      <Text style={{ color: t.faint, fontSize: 10.5, flex: 1 }}>
-        lagging — each dot is one company; the further from the line, the stronger
-        {view === 'global' ? ', against every company on the page' : ', against its own sector'}
-      </Text>
-    </View>
-  );
-}
-
-/** A quiet segmented control — the standard phone idiom for two views of one thing. */
-function Tabs({ tiers, active, onPick, t }) {
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        backgroundColor: t.ruleSoft,
-        borderRadius: 9,
-        padding: 3,
-        marginTop: 12,
-      }}
-    >
-      {tiers.map((tier, i) => {
-        const on = i === active;
-        return (
-          <Pressable
-            key={tier.key}
-            onPress={() => { if (!on) { tapped(); onPick(i); } }}
-            style={{
-              flex: 1,
-              paddingVertical: 6,
-              alignItems: 'center',
-              borderRadius: 7,
-              backgroundColor: on ? t.surface : 'transparent',
-              borderWidth: 1,
-              borderColor: on ? t.rule : 'transparent',
-            }}
-          >
-            <Text style={{ color: on ? t.ink : t.faint, fontSize: 12.5, fontWeight: '600' }}>
-              {tier.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-/** Names the active family, and is the one obvious way out of it. */
-function FamilyBar({ pick, t, onClear }) {
-  return (
-    <Pressable
-      onPress={onClear}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: t.surface,
-        borderWidth: 1,
-        borderColor: t.rule,
-        borderRadius: 8,
-        paddingVertical: 7,
-        paddingHorizontal: 10,
-        marginBottom: 10,
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        borderBottomWidth: 1,
+        borderBottomColor: t.ruleSoft,
+        backgroundColor: t.ground,
       }}
     >
-      <Text style={{ color: t.muted, fontSize: 11.5, flex: 1 }} numberOfLines={1}>
-        Lit up: what moves with {pick.ticker}
-        {pick.kin.length ? ' · ' + pick.kin.length + ' names' : ''}
+      <Pressable
+        onPress={onBack}
+        hitSlop={12}
+        style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 7, opacity: pressed ? 0.5 : 1 })}
+      >
+        <Text style={{ color: t.accent, fontSize: 16, fontWeight: '600' }}>‹ Back</Text>
+      </Pressable>
+      <Text numberOfLines={1} style={{ color: t.ink, fontSize: 15, fontWeight: '600', flex: 1, textAlign: 'center' }}>
+        {title}
       </Text>
-      <Text style={{ color: t.accent, fontSize: 11.5, fontWeight: '600' }}>Clear</Text>
-    </Pressable>
-  );
-}
-
-/** The tapped-together list. Chips, not rows — it should stay one glance tall. */
-function WatchCard({ wl, lookup, t, onRemove }) {
-  const rows = Object.keys(wl).filter((k) => lookup[k]).sort();
-  if (!rows.length) return null;
-  return (
-    <View
-      style={{
-        backgroundColor: t.surface,
-        borderWidth: 1,
-        borderColor: t.rule,
-        borderRadius: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        marginBottom: 10,
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-        <Text style={{ color: t.ink, fontSize: 13.5, fontWeight: '600', flex: 1 }}>Watchlist</Text>
-        <Text style={{ color: t.faint, fontSize: 10.5 }}>{rows.length} · tap a name to remove</Text>
-      </View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 7 }}>
-        {rows.map((k) => {
-          const c = lookup[k];
-          const tone = c.score === null ? t.muted : c.score < 0 ? t.neg : t.pos;
-          return (
-            <Pressable
-              key={k}
-              onPress={() => onRemove(k)}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'baseline',
-                borderWidth: 1,
-                borderColor: t.rule,
-                borderRadius: 6,
-                paddingVertical: 4,
-                paddingHorizontal: 8,
-                marginRight: 4,
-                marginBottom: 4,
-              }}
-            >
-              <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11 }}>{k}</Text>
-              <Text style={{ color: tone, fontFamily: MONO, fontSize: 10, marginLeft: 5 }}>
-                {c.score === null ? '—' : signed(c.score)}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <View style={{ minWidth: 74, alignItems: 'flex-end', paddingRight: 8 }}>{action}</View>
     </View>
   );
 }
@@ -709,69 +241,316 @@ function Freshness({ state, asOf, asOfISO, t }) {
     live: 'Up to date — numbers from ' + asOf + '.',
     stale: 'Offline, so showing the saved numbers from ' + asOf + '.',
   }[state];
-  const dot = stale
-    ? t.neg
-    : { baked: t.faint, checking: t.faint, live: t.pos, stale: t.neg }[state];
+  const dot = stale ? t.neg : { baked: t.faint, checking: t.faint, live: t.pos, stale: t.neg }[state];
 
   return (
-    <View style={{ flexDirection: 'row', marginTop: 10 }}>
-      <View
-        style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dot, marginRight: 7, marginTop: 5 }}
-      />
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 4 }}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dot, marginRight: 7, marginTop: 5 }} />
       <Text style={{ color: t.faint, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
         {line}
         {FEED.url ? ' Pull down to refresh.' : ''}
-        {stale && (
-          <Text style={{ color: t.neg }}>
-            {' '}
-            These are {age} days old — nobody has refreshed them.
-          </Text>
-        )}
+        {stale ? <Text style={{ color: t.neg }}>{' '}These are {age} days old — nobody has refreshed them.</Text> : null}
       </Text>
     </View>
   );
 }
 
-function Details({ t, open, onToggle, meta }) {
+// ---- screen 1: the sectors --------------------------------------------------
+
+/**
+ * The whole market as eleven rows. Rank, name, what it did in plain words,
+ * the score, and a hairline for size. Nothing to decode and nothing to aim
+ * at — the row is the target and it spans the screen.
+ */
+function SectorsScreen({ data, tiers, tab, setTab, t, peak, wlCount, onOpenSector, onOpenWatchlist, onOpenHow, state }) {
+  const active = tiers[Math.min(tab, tiers.length - 1)];
   return (
-    <View
-      style={{
-        backgroundColor: t.surface,
-        borderColor: t.rule,
-        borderWidth: 1,
-        borderRadius: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        marginBottom: 10,
-      }}
-    >
-      <Pressable onPress={onToggle}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ color: t.ink, fontSize: 13.5, fontWeight: '600', flex: 1 }}>
-            How this works
+    <View style={{ paddingHorizontal: 14, paddingBottom: 40 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 8 }}>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', flex: 1, letterSpacing: -0.4 }}>
+          Sectors
+        </Text>
+        <Pressable
+          onPress={onOpenWatchlist}
+          hitSlop={10}
+          style={({ pressed }) => ({ paddingHorizontal: 10, paddingVertical: 6, opacity: pressed ? 0.5 : 1 })}
+        >
+          <Text style={{ color: t.accent, fontSize: 14, fontWeight: '600' }}>
+            Watchlist{wlCount ? ' ' + wlCount : ''}
           </Text>
-          <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 13 }}>{open ? '−' : '+'}</Text>
+        </Pressable>
+      </View>
+
+      <Freshness state={state} asOf={data.meta.asOf} asOfISO={data.meta.asOfISO} t={t} />
+
+      {tiers.length > 1 && (
+        <View style={{ flexDirection: 'row', backgroundColor: t.ruleSoft, borderRadius: 9, padding: 3, marginTop: 12 }}>
+          {tiers.map((tier, i) => {
+            const on = i === tiers.indexOf(active);
+            return (
+              <Pressable
+                key={tier.key}
+                onPress={() => { if (!on) { tapped(); setTab(i); } }}
+                style={{
+                  flex: 1, paddingVertical: 7, alignItems: 'center', borderRadius: 7,
+                  backgroundColor: on ? t.surface : 'transparent',
+                }}
+              >
+                <Text style={{ color: on ? t.ink : t.faint, fontSize: 13, fontWeight: '600' }}>{tier.label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
+      )}
+
+      <GroupLabel t={t} right="best first">Nine months, steadiest climb first</GroupLabel>
+
+      <Card t={t}>
+        {active.sectors.map((s, i) => (
+          <Row key={s.name} t={t} onPress={() => onOpenSector(s)} last={i === active.sectors.length - 1}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 12, width: 24 }}>{s.rank}</Text>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={{ color: t.ink, fontSize: 17, fontWeight: '600' }}>{s.name}</Text>
+                <Text numberOfLines={1} style={{ color: t.muted, fontSize: 12.5, marginTop: 2 }}>
+                  {s.verdict} · {s.rising} of {s.n} companies up
+                </Text>
+              </View>
+              <Text style={{ color: toneOf(s.score, t), fontFamily: MONO, fontSize: 17, fontWeight: '700' }}>
+                {signed(s.score)}
+              </Text>
+              <Text style={{ color: t.faint, fontSize: 19, marginLeft: 8, marginTop: -2 }}>›</Text>
+            </View>
+            <Bar value={s.score} peak={peak} t={t} />
+          </Row>
+        ))}
+      </Card>
+
+      <Pressable
+        onPress={onOpenHow}
+        style={({ pressed }) => ({ marginTop: 18, paddingVertical: 12, alignItems: 'center', opacity: pressed ? 0.5 : 1 })}
+      >
+        <Text style={{ color: t.accent, fontSize: 14, fontWeight: '600' }}>What does the score mean?</Text>
       </Pressable>
 
-      {open &&
-        meta.details.map((d) => (
-          <View key={d.title} style={{ marginTop: 12 }}>
-            <Text style={{ color: t.ink, fontSize: 12, fontWeight: '600' }}>{d.title}</Text>
-            <Text style={{ color: t.muted, fontSize: 12, lineHeight: 18, marginTop: 3 }}>
-              {d.body}
+      <Text style={{ color: t.faint, fontSize: 11, lineHeight: 17, marginTop: 4, paddingHorizontal: 4 }}>
+        {data.meta.footer}
+      </Text>
+    </View>
+  );
+}
+
+// ---- screen 2: one sector ---------------------------------------------------
+
+/**
+ * Every company in one sector as a plain ranked list. The whole point of this
+ * screen is that it is boring: rank, ticker, name, score, one hairline. Fifty
+ * rows scroll in a second and every one is a comfortable target.
+ */
+function SectorScreen({ s, t, wl, peak, onOpenCompany }) {
+  const scored = s.constituents.filter((c) => c.score !== null);
+  const unscored = s.constituents.filter((c) => c.score === null);
+  return (
+    <View style={{ paddingHorizontal: 14, paddingBottom: 40 }}>
+      <View style={{ marginTop: 10, marginBottom: 2, paddingHorizontal: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+          <Text style={{ color: t.ink, fontSize: 25, fontWeight: '700', flex: 1, letterSpacing: -0.4 }}>{s.name}</Text>
+          <Text style={{ color: toneOf(s.score, t), fontFamily: MONO, fontSize: 25, fontWeight: '700' }}>
+            {signed(s.score)}
+          </Text>
+        </View>
+        <Text style={{ color: t.muted, fontSize: 13, marginTop: 6, lineHeight: 19 }}>
+          {s.gloss}. {s.verdict[0].toUpperCase() + s.verdict.slice(1)} over the nine months —
+          up {pct(s.ret)} a year with a typical swing of {pct(s.vol)}, and {s.rising} of its {s.n} companies
+          climbing on their own.
+        </Text>
+        {s.etf ? (
+          <Text style={{ color: t.faint, fontSize: 12, marginTop: 6 }}>
+            The real {s.etf} fund scores {signed(s.etfScore)} over the same stretch.
+          </Text>
+        ) : null}
+      </View>
+
+      <GroupLabel t={t} right={scored.length + ' companies'}>Strongest first</GroupLabel>
+
+      <Card t={t}>
+        {scored.map((c, i) => (
+          <Row key={c.ticker} t={t} onPress={() => onOpenCompany(c, s)} last={i === scored.length - 1 && !unscored.length}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 12, width: 24 }}>{i + 1}</Text>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 14, fontWeight: '600' }}>
+                  {c.ticker}{wl[c.ticker] ? ' ★' : ''}
+                </Text>
+                <Text numberOfLines={1} style={{ color: t.muted, fontSize: 12.5, marginTop: 2 }}>{c.name}</Text>
+              </View>
+              <Text style={{ color: toneOf(c.score, t), fontFamily: MONO, fontSize: 15, fontWeight: '600' }}>
+                {signed(c.score)}
+              </Text>
+              <Text style={{ color: t.faint, fontSize: 19, marginLeft: 8, marginTop: -2 }}>›</Text>
+            </View>
+            <Bar value={c.score} peak={peak} t={t} />
+          </Row>
+        ))}
+        {unscored.map((c, i) => (
+          <Row key={c.ticker} t={t} onPress={() => onOpenCompany(c, s)} last={i === unscored.length - 1}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 12, width: 24 }}>–</Text>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 14 }}>{c.ticker}</Text>
+                <Text numberOfLines={1} style={{ color: t.faint, fontSize: 12.5, marginTop: 2 }}>
+                  {c.name} · too new to score
+                </Text>
+              </View>
+            </View>
+          </Row>
+        ))}
+      </Card>
+    </View>
+  );
+}
+
+// ---- screen 3: one company --------------------------------------------------
+
+/**
+ * One company, and the answer to the only two questions worth asking about
+ * it: where does it stand, and what moves with it. The family is a list of
+ * rows like everything else, so following one is the same gesture as
+ * everything else.
+ */
+function CompanyScreen({ c, home, kin, t, watched, onWatch, onOpenCompany }) {
+  const away = kin.filter((k) => k.sector !== home.sector).length;
+  return (
+    <View style={{ paddingHorizontal: 14, paddingBottom: 40 }}>
+      <View style={{ marginTop: 10, paddingHorizontal: 4 }}>
+        <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 27, fontWeight: '700' }}>{c.ticker}</Text>
+        <Text style={{ color: t.muted, fontSize: 15, marginTop: 3 }}>{c.name}</Text>
+      </View>
+
+      <Card t={t} style={{ marginTop: 16 }}>
+        <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+            <Text style={{ color: t.muted, fontSize: 13, flex: 1 }}>Steady-climb score</Text>
+            <Text style={{ color: toneOf(c.score, t), fontFamily: MONO, fontSize: 24, fontWeight: '700' }}>
+              {signed(c.score)}
             </Text>
           </View>
-        ))}
+          <Text style={{ color: t.faint, fontSize: 12.5, marginTop: 8, lineHeight: 18 }}>
+            {c.score === null
+              ? 'Not scored — it has not been listed long enough to cover the nine months.'
+              : ordinal(c.place) + ' of ' + c.of + ' in ' + home.sector +
+                (c.gr ? ', and ' + ordinal(c.gr) + ' of ' + c.universe + ' across every sector' : '') + '.'}
+          </Text>
+        </View>
+      </Card>
 
-      {open && (
-        <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 10, lineHeight: 15, marginTop: 12 }}>
-          {meta.stamp}
+      <Pressable
+        onPress={onWatch}
+        style={({ pressed }) => ({
+          marginTop: 14,
+          paddingVertical: 14,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: watched ? t.rule : t.accent,
+          backgroundColor: pressed ? t.ruleSoft : 'transparent',
+          alignItems: 'center',
+        })}
+      >
+        <Text style={{ color: watched ? t.muted : t.accent, fontSize: 15, fontWeight: '600' }}>
+          {watched ? 'On your watchlist — tap to remove' : 'Add to watchlist'}
+        </Text>
+      </Pressable>
+
+      <GroupLabel t={t} right={kin.length ? kin.length + ' names' : ''}>What moves with it</GroupLabel>
+
+      {kin.length ? (
+        <>
+          <Text style={{ color: t.faint, fontSize: 12, lineHeight: 17, marginBottom: 8, paddingHorizontal: 4 }}>
+            These rose and fell alongside {c.ticker} day by day
+            {away ? ' — ' + away + ' of them from other sectors' : ''}.
+          </Text>
+          <Card t={t}>
+            {kin.map((k, i) => (
+              <Row key={k.ticker} t={t} onPress={() => onOpenCompany(k.ticker)} last={i === kin.length - 1}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 14, fontWeight: '600' }}>{k.ticker}</Text>
+                    <Text numberOfLines={1} style={{ color: t.muted, fontSize: 12.5, marginTop: 2 }}>
+                      {k.name} · {k.sector}
+                    </Text>
+                  </View>
+                  <Text style={{ color: toneOf(k.score, t), fontFamily: MONO, fontSize: 14 }}>{signed(k.score)}</Text>
+                  <Text style={{ color: t.faint, fontSize: 19, marginLeft: 8, marginTop: -2 }}>›</Text>
+                </View>
+              </Row>
+            ))}
+          </Card>
+        </>
+      ) : (
+        <Text style={{ color: t.faint, fontSize: 12.5, lineHeight: 18, paddingHorizontal: 4 }}>
+          Nothing else on the page moved closely with it — it went its own way.
         </Text>
       )}
     </View>
   );
 }
+
+// ---- watchlist and the explainer -------------------------------------------
+
+function WatchlistScreen({ wl, lookup, t, onOpenCompany }) {
+  const rows = Object.keys(wl).filter((k) => lookup[k]).sort();
+  if (!rows.length) {
+    return (
+      <View style={{ paddingHorizontal: 18, paddingTop: 40 }}>
+        <Text style={{ color: t.muted, fontSize: 14, lineHeight: 21, textAlign: 'center' }}>
+          Nothing saved yet.{'\n'}Open any company and tap “Add to watchlist”.
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View style={{ paddingHorizontal: 14, paddingBottom: 40 }}>
+      <GroupLabel t={t} right={rows.length + ' saved'}>Your watchlist</GroupLabel>
+      <Card t={t}>
+        {rows.map((k, i) => {
+          const c = lookup[k];
+          return (
+            <Row key={k} t={t} onPress={() => onOpenCompany(k)} last={i === rows.length - 1}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 14, fontWeight: '600' }}>{k}</Text>
+                  <Text numberOfLines={1} style={{ color: t.muted, fontSize: 12.5, marginTop: 2 }}>
+                    {c.name} · {c.sector}
+                  </Text>
+                </View>
+                <Text style={{ color: toneOf(c.score, t), fontFamily: MONO, fontSize: 14 }}>{signed(c.score)}</Text>
+                <Text style={{ color: t.faint, fontSize: 19, marginLeft: 8, marginTop: -2 }}>›</Text>
+              </View>
+            </Row>
+          );
+        })}
+      </Card>
+    </View>
+  );
+}
+
+function HowScreen({ meta, t }) {
+  return (
+    <View style={{ paddingHorizontal: 18, paddingBottom: 44 }}>
+      {meta.details.map((d) => (
+        <View key={d.title} style={{ marginTop: 20 }}>
+          <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{d.title}</Text>
+          <Text style={{ color: t.muted, fontSize: 13.5, lineHeight: 20, marginTop: 5 }}>{d.body}</Text>
+        </View>
+      ))}
+      <Text style={{ color: t.faint, fontFamily: MONO, fontSize: 10.5, lineHeight: 16, marginTop: 24 }}>
+        {meta.stamp}
+      </Text>
+    </View>
+  );
+}
+
+// ---- plumbing ---------------------------------------------------------------
 
 /** A feed is only usable if it carries the shape the screen renders. */
 function usable(d) {
@@ -790,19 +569,26 @@ function tiersOf(data) {
 export default function App() {
   const dark = useColorScheme() === 'dark';
   const t = dark ? DARK : LIGHT;
-  const [pick, setPick] = useState(null);
-  const [how, setHow] = useState(false);
-  const [tab, setTab] = useState(0);
-  const [view, setView] = useState('sector');
-  const [wl, setWl] = useState({});
-  // The strip needs its own width in points to know when two dots collide.
-  const { width } = useWindowDimensions();
-  const plotW = width - 2 * 14 - 2 * 12;   // screen padding, card padding
-  const scroller = useRef(null);
-  const cardY = useRef({});
   const [data, setData] = useState(BAKED);
   const [state, setState] = useState(FEED.url ? 'checking' : 'baked');
   const [busy, setBusy] = useState(false);
+  const [wl, setWl] = useState({});
+  const [tab, setTab] = useState(0);
+  // A plain navigation stack. Screens are pushed and popped; the hardware
+  // back button pops it, so Android behaves the way Android should.
+  const [stack, setStack] = useState([{ k: 'sectors' }]);
+  const here = stack[stack.length - 1];
+
+  const push = useCallback((screen) => { tapped(); setStack((s) => s.concat([screen])); }, []);
+  const pop = useCallback(() => { tapped(); setStack((s) => (s.length > 1 ? s.slice(0, -1) : s)); }, []);
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (stack.length > 1) { pop(); return true; }
+      return false;
+    });
+    return () => { try { sub.remove(); } catch (e) {} };
+  }, [stack.length, pop]);
 
   const load = useCallback((manual) => {
     if (!FEED.url) return;
@@ -823,7 +609,7 @@ export default function App() {
         if (!usable(fresh)) throw new Error('unusable feed');
         setData(fresh);
         setState('live');
-        setPick(null);          // the selection described the old numbers
+        setStack([{ k: 'sectors' }]);   // the open screens described the old numbers
         if (manual) landed();
       })
       .catch(() => setState('stale'))
@@ -840,128 +626,127 @@ export default function App() {
     } catch (e) {}
   }, []);
 
-  const toggleWatch = useCallback((c) => {
+  const toggleWatch = useCallback((ticker) => {
     tapped();
     setWl((prev) => {
       const next = { ...prev };
-      if (next[c.ticker]) delete next[c.ticker];
-      else next[c.ticker] = true;
+      if (next[ticker]) delete next[ticker];
+      else next[ticker] = true;
       saveWl(next);
       return next;
     });
   }, []);
 
-  const tiers = React.useMemo(() => tiersOf(data), [data]);
+  const tiers = useMemo(() => tiersOf(data), [data]);
   const active = tiers[Math.min(tab, tiers.length - 1)];
 
-  // Which sector and which list every ticker sits in. Peers cross both, so the
-  // readout can only count what is off-screen if it knows where everything is.
-  const homeOf = React.useMemo(() => {
+  // Where every ticker lives, with the numbers a row needs. Peers cross
+  // sectors and tiers, so a company screen can only describe its family if it
+  // can look any ticker up from anywhere.
+  const lookup = useMemo(() => {
     const m = {};
+    const universe = [];
     tiers.forEach((tier) =>
-      tier.sectors.forEach((s) =>
+      tier.sectors.forEach((s) => {
+        const scored = s.constituents.filter((c) => c.score !== null);
         s.constituents.forEach((c) => {
-          m[c.ticker] = { sector: s.name, tier: tier.key, name: c.name, score: c.score };
-        })
-      )
+          const place = scored.indexOf(c) + 1;
+          m[c.ticker] = {
+            ticker: c.ticker, name: c.name, score: c.score, sector: s.name,
+            tier: tier.key, place: place || null, of: scored.length,
+          };
+          if (c.score !== null) universe.push(m[c.ticker]);
+        });
+      })
     );
+    universe.sort((a, b) => b.score - a.score);
+    universe.forEach((c, i) => { c.gr = i + 1; c.universe = universe.length; });
     return m;
   }, [tiers]);
 
-  const choose = useCallback((sector, c, i, keep) => {
-    tapped();
-    setPick((prev) => {
-      // A row tap toggles; a scrub that settles on the same name keeps it.
-      if (!keep && prev && prev.tier === sector.tier && prev.ticker === c.ticker) return null;
-      const kin = ((data.peers || {})[c.ticker] || []).map(([ticker, r]) => ({
-        ticker,
-        r,
-        sector: (homeOf[ticker] || {}).sector,
-        tier: (homeOf[ticker] || {}).tier,
-      }));
-      // A lookup rather than a list: every cell on screen asks this question.
-      const kinSet = {};
-      kin.forEach((k) => { kinSet[k.ticker] = true; });
-      return {
-        tier: sector.tier, sector: sector.name, ticker: c.ticker, name: c.name,
-        score: c.score, place: i + 1, of: sector.n, kin, kinSet,
-      };
-    });
-  }, [data, homeOf]);
+  const openCompany = useCallback((ticker) => {
+    const c = lookup[ticker];
+    if (c) push({ k: 'company', ticker });
+  }, [lookup, push]);
 
-  const zOf = view === 'global' ? (c) => c.g : (c) => c.z;
+  const peak = Math.max(...active.sectors.map((s) => Math.abs(s.score)), 0.01);
+  const namePeak = 3;   // scores past ±3 are rare; a fixed peak keeps bars comparable across sectors
+
+  let title = '';
+  let body = null;
+  if (here.k === 'sectors') {
+    body = (
+      <SectorsScreen
+        data={data} tiers={tiers} tab={tab} setTab={setTab} t={t} peak={peak}
+        state={state} wlCount={Object.keys(wl).filter((k) => lookup[k]).length}
+        onOpenSector={(s) => push({ k: 'sector', name: s.name, tier: s.tier })}
+        onOpenWatchlist={() => push({ k: 'watchlist' })}
+        onOpenHow={() => push({ k: 'how' })}
+      />
+    );
+  } else if (here.k === 'sector') {
+    const s = (tiers.find((x) => x.key === here.tier) || active).sectors.find((x) => x.name === here.name);
+    title = here.name;
+    body = s ? (
+      <SectorScreen s={s} t={t} wl={wl} peak={namePeak} onOpenCompany={(c) => push({ k: 'company', ticker: c.ticker })} />
+    ) : null;
+  } else if (here.k === 'company') {
+    const c = lookup[here.ticker];
+    title = here.ticker;
+    const kin = ((data.peers || {})[here.ticker] || [])
+      .map(([ticker]) => lookup[ticker])
+      .filter(Boolean);
+    body = c ? (
+      <CompanyScreen
+        c={c} home={c} kin={kin} t={t} watched={!!wl[here.ticker]}
+        onWatch={() => toggleWatch(here.ticker)} onOpenCompany={openCompany}
+      />
+    ) : null;
+  } else if (here.k === 'watchlist') {
+    title = 'Watchlist';
+    body = <WatchlistScreen wl={wl} lookup={lookup} t={t} onOpenCompany={openCompany} />;
+  } else if (here.k === 'how') {
+    title = 'How this works';
+    body = <HowScreen meta={data.meta} t={t} />;
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.ground }}>
       <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} />
+      {stack.length > 1 && (
+        <NavBar
+          t={t}
+          title={title}
+          onBack={pop}
+          action={
+            here.k === 'company' ? (
+              <Pressable onPress={() => toggleWatch(here.ticker)} hitSlop={12} style={{ paddingVertical: 7 }}>
+                <Text style={{ color: wl[here.ticker] ? t.accent : t.faint, fontSize: 17 }}>
+                  {wl[here.ticker] ? '★' : '☆'}
+                </Text>
+              </Pressable>
+            ) : null
+          }
+        />
+      )}
       <ScrollView
-        ref={scroller}
-        contentContainerStyle={{ padding: 14, paddingBottom: 48 }}
+        // Keyed by screen so every push lands at the top of the new screen
+        // rather than halfway down the last one.
+        key={here.k + ':' + (here.ticker || here.name || '')}
+        contentContainerStyle={{ paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          FEED.url ? (
+          FEED.url && here.k === 'sectors' ? (
             <RefreshControl refreshing={busy} onRefresh={() => load(true)} tintColor={t.faint} />
           ) : undefined
         }
       >
-        <Text style={{ color: t.ink, fontSize: 22, fontWeight: '700', lineHeight: 27, marginTop: 4 }}>
-          Which sectors are climbing?
-        </Text>
-        <Text style={{ color: t.muted, fontSize: 12.5, marginTop: 6, lineHeight: 18 }}>
-          {data.meta.blurb}
-        </Text>
-
-        <Freshness state={state} asOf={data.meta.asOf} asOfISO={data.meta.asOfISO} t={t} />
-
-        <MarketMap
-          sectors={active.sectors}
-          t={t}
-          onJump={(name) => {
-            const y = cardY.current[active.key + ':' + name];
-            if (scroller.current && y !== undefined) scroller.current.scrollTo({ y: y - 6, animated: true });
-          }}
-        />
-
-        {tiers.length > 1 && (
-          <Tabs tiers={tiers} active={tiers.indexOf(active)} onPick={setTab} t={t} />
-        )}
-
-        <ViewToggle view={view} onPick={setView} t={t} />
-
-        <Legend t={t} view={view} />
-
-        <View style={{ height: 14 }} />
-
-        <WatchCard wl={wl} lookup={homeOf} t={t} onRemove={(k) => toggleWatch({ ticker: k })} />
-
-        {pick && <FamilyBar pick={pick} t={t} onClear={() => { tapped(); setPick(null); }} />}
-
-        <Details t={t} open={how} onToggle={() => setHow(!how)} meta={data.meta} />
-
-        {active.sectors.map((s) => (
-          <SectorCard
-            key={s.name}
-            s={s}
-            t={t}
-            plotW={plotW}
-            pick={pick}
-            zOf={zOf}
-            wl={wl}
-            onPick={choose}
-            onWatch={toggleWatch}
-            onLayout={(e) => { cardY.current[active.key + ':' + s.name] = e.nativeEvent.layout.y; }}
-          />
-        ))}
-
-        <Text style={{ color: t.faint, fontSize: 11, lineHeight: 17, marginTop: 8 }}>
-          {data.meta.footer}
-        </Text>
+        {body}
       </ScrollView>
     </SafeAreaView>
   );
 }
 """
-
 
 def build_data(payload: dict) -> dict:
     """Trim the full payload to what the phone build renders."""
@@ -980,6 +765,7 @@ def build_data(payload: dict) -> dict:
             "gloss": SECTOR_GLOSS.get(s["sector"], ""),
             "rank": s["rank"],
             "score": round(s["score"], 4),
+            "verdict": verdict_for(s["score"]),
             "ret": round(s["ann_log_return"], 5),
             "vol": round(s["ann_vol"], 5),
             "n": s["n_constituents"],
