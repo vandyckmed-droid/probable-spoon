@@ -325,14 +325,30 @@ def test_global_z_is_a_different_yardstick_from_sector_z():
     assert any(c["g"] != c["z"] for c in everyone if c["g"] is not None)
 
 
-def test_one_gesture_only_tap_selects_and_the_readout_watches():
-    """No long press anywhere; the watch toggle lives in the readout."""
+def test_scrub_selects_and_no_dot_is_a_tap_target():
+    """Nobody aims at an 8pt dot: the strip is one responder surface — press
+    anywhere, slide to the name, lift to keep it. Dots themselves swallow no
+    touches, and there is no long press anywhere."""
     src = sector_snack.render_app(_payload())
 
+    assert "onResponderGrant={scrub}" in src
+    assert "onResponderMove={scrub}" in src
+    assert "onResponderRelease={onSettle}" in src
+    assert "onResponderTerminationRequest={() => false}" in src   # the scroll view may not steal a scrub
+    assert "e.nativeEvent.locationX" in src
+    assert "onPress={() => onPick(s, c, p.i)}" not in src         # the old per-dot tap is gone
     assert "onLongPress" not in src
     assert "delayLongPress" not in src
-    assert "onPress={() => onPick(s, c, p.i)}" in src        # every dot selects
     assert "'On watchlist — tap to remove' : 'Add to watchlist'" in src
+
+
+def test_scrub_settle_keeps_the_name_instead_of_toggling():
+    """Sliding back to the already-picked name must not deselect it — only a
+    deliberate row tap toggles."""
+    src = sector_snack.render_app(_payload())
+
+    assert "onPick(s, placed[k].c, placed[k].i, true)" in src
+    assert "if (!keep && prev && prev.tier === sector.tier && prev.ticker === c.ticker) return null;" in src
 
 
 def test_no_tinted_fills_anywhere():
@@ -343,7 +359,6 @@ def test_no_tinted_fills_anywhere():
     assert "cellFill" not in src
     assert "function mix(" not in src
     assert "function packLanes(" in src                       # dots stack, not shade
-    assert "hitSlop" in src                                   # a 8pt dot still gets a thumb-size target
 
 
 def test_watchlist_survives_restarts_and_storage_failures():

@@ -157,56 +157,100 @@ function packLanes(items, plotW) {
 
 /**
  * Every company in the sector as one dot on a shared axis: right of the
- * centre line leading, left lagging, distance is strength. Full-saturation
- * colour on a small mark stays crisp where a tinted cell went muddy.
+ * centre line leading, left lagging, distance is strength.
+ *
+ * Nobody taps an 8-point dot. The strip is one touch surface: press anywhere
+ * and slide, and the nearest name selects itself under the finger — a tick of
+ * haptic per name, a live label above the dots, the readout below following
+ * along. Lifting settles the selection and lights its family. A tap is just
+ * a zero-length slide, so nothing on this screen ever needs aiming.
  */
-function Strip({ s, t, zOf, plotW, pick, wl, onPick }) {
-  const placed = s.constituents
-    .map((c, i) => ({ c, i, z: zOf(c), x: X(zOf(c) === null || zOf(c) === undefined ? 0 : zOf(c)) }))
-    .sort((a, b) => a.x - b.x);
+const TIP = 20;   // label lane above the dots
+
+function Strip({ s, t, placed, plotW, pick, wl, live, onLive, onSettle }) {
   const laneOf = packLanes(placed, plotW);
   const laneCount = Math.max(...laneOf, 0) + 1;
-  const height = laneCount * LANE + DOT;
+  const height = TIP + laneCount * LANE + DOT;
+
+  const nearest = (px) => {
+    const xp = (px / (plotW || 1)) * 100;
+    let best = 0;
+    let gap = Infinity;
+    for (let i = 0; i < placed.length; i++) {
+      const d = Math.abs(placed[i].x - xp);
+      if (d < gap) { gap = d; best = i; }
+    }
+    return best;
+  };
+  const scrub = (e) => onLive(nearest(e.nativeEvent.locationX));
+  const liveDot = live === null ? null : placed[live];
 
   return (
-    <View style={{ height, marginTop: 10 }}>
+    <View
+      testID={'strip-' + s.name}
+      style={{ height, marginTop: 6 }}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderTerminationRequest={() => false}
+      onResponderGrant={scrub}
+      onResponderMove={scrub}
+      onResponderRelease={onSettle}
+    >
       {/* centre line and the ±1.5σ hairlines give the dots their scale */}
-      <View style={{ position: 'absolute', left: X(-1.5) + '%', top: 0, bottom: 0, width: 1, backgroundColor: t.ruleSoft }} />
-      <View style={{ position: 'absolute', left: X(1.5) + '%', top: 0, bottom: 0, width: 1, backgroundColor: t.ruleSoft }} />
-      <View style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, backgroundColor: t.rule }} />
+      <View pointerEvents="none" style={{ position: 'absolute', left: X(-1.5) + '%', top: TIP, bottom: 0, width: 1, backgroundColor: t.ruleSoft }} />
+      <View pointerEvents="none" style={{ position: 'absolute', left: X(1.5) + '%', top: TIP, bottom: 0, width: 1, backgroundColor: t.ruleSoft }} />
+      <View pointerEvents="none" style={{ position: 'absolute', left: '50%', top: TIP, bottom: 0, width: 1, backgroundColor: t.rule }} />
       {placed.map((p, k) => {
         const c = p.c;
         const unscored = p.z === null || p.z === undefined;
-        const chosen = pick && pick.ticker === c.ticker && pick.sector === s.name && pick.tier === s.tier;
+        const isLive = live === k;
+        const chosen = !isLive && pick && pick.ticker === c.ticker && pick.sector === s.name && pick.tier === s.tier;
         const kin = pick && pick.kinSet[c.ticker];
-        const dim = pick && !chosen && !kin;
-        const ring = chosen ? t.ink : kin ? t.accent : wl[c.ticker] ? t.ink : 'transparent';
+        const dim = (pick || live !== null) && !isLive && !chosen && !kin;
+        const grow = isLive || chosen;
+        const ring = isLive || chosen ? t.ink : kin ? t.accent : wl[c.ticker] ? t.ink : 'transparent';
         return (
-          <Pressable
+          <View
             key={c.ticker}
-            onPress={() => onPick(s, c, p.i)}
-            hitSlop={7}
+            pointerEvents="none"
             style={{
               position: 'absolute',
               left: p.x + '%',
-              top: laneOf[k] * LANE + (chosen ? 0 : 1),
-              marginLeft: -(DOT / 2) - (chosen ? 1 : 0),
-              opacity: dim ? 0.25 : 1,
+              top: TIP + laneOf[k] * LANE + (grow ? 0 : 1),
+              marginLeft: -(DOT / 2) - (grow ? 1 : 0),
+              opacity: dim ? 0.3 : 1,
             }}
           >
             <View
               style={{
-                width: DOT + (chosen ? 2 : 0),
-                height: DOT + (chosen ? 2 : 0),
+                width: DOT + (grow ? 2 : 0),
+                height: DOT + (grow ? 2 : 0),
                 borderRadius: DOT,
                 backgroundColor: unscored ? 'transparent' : toneOf(p.z, t),
-                borderWidth: unscored ? 1 : chosen || kin || wl[c.ticker] ? 1.5 : 0,
+                borderWidth: unscored ? 1 : grow || kin || wl[c.ticker] ? 1.5 : 0,
                 borderColor: unscored ? t.faint : ring,
               }}
             />
-          </Pressable>
+          </View>
         );
       })}
+      {liveDot && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: Math.max(11, Math.min(89, liveDot.x)) + '%',
+            top: 0,
+            marginLeft: -44,
+            width: 88,
+            alignItems: 'center',
+          }}
+        >
+          <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11, fontWeight: '700' }}>
+            {liveDot.c.ticker}{liveDot.c.score === null ? '' : '  ' + signed(liveDot.c.score)}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -295,11 +339,36 @@ function Readout({ p, t, watched, onWatch }) {
  */
 function SectorCard({ s, t, plotW, pick, zOf, wl, onPick, onWatch, onLayout }) {
   const tone = s.score < 0 ? t.neg : t.pos;
+  // The x-sorted dots: scrubbing left to right walks the sector best-to-worst
+  // (or the reverse), one haptic tick per name.
+  const placed = React.useMemo(
+    () =>
+      s.constituents
+        .map((c, i) => ({ c, i, z: zOf(c), x: X(zOf(c) === null || zOf(c) === undefined ? 0 : zOf(c)) }))
+        .sort((a, b) => a.x - b.x),
+    [s, zOf]
+  );
+  const [live, setLive] = useState(null);
   const scored = s.constituents.filter((c) => c.score !== null);
   const head = scored.slice(0, 3);
   const tail = scored.slice(-3);
   const hidden = scored.length - head.length - tail.length;
   const mine = pick && pick.sector === s.name && pick.tier === s.tier ? pick : null;
+
+  const onLive = (k) => {
+    setLive((prev) => {
+      if (prev !== k) tapped();
+      return k;
+    });
+  };
+  const onSettle = () => {
+    setLive((k) => {
+      if (k !== null) onPick(s, placed[k].c, placed[k].i, true);
+      return null;
+    });
+  };
+
+  const liveDot = live === null ? null : placed[live];
 
   return (
     <View
@@ -327,16 +396,44 @@ function SectorCard({ s, t, plotW, pick, zOf, wl, onPick, onWatch, onLayout }) {
         {s.etf ? ' · ' + s.etf + ' ' + signed(s.etfScore) : ''}
       </Text>
 
-      <Strip s={s} t={t} zOf={zOf} plotW={plotW} pick={pick} wl={wl} onPick={onPick} />
+      <Strip
+        s={s}
+        t={t}
+        placed={placed}
+        plotW={plotW}
+        pick={pick}
+        wl={wl}
+        live={live}
+        onLive={onLive}
+        onSettle={onSettle}
+      />
 
-      <View style={{ marginTop: 6 }}>
+      {/* One steady line under the strip: the hint, then whatever the finger
+          is on. Fixed height, so scrubbing never makes the page jump. */}
+      <View style={{ height: 18, justifyContent: 'center' }}>
+        {liveDot ? (
+          <Text numberOfLines={1} style={{ color: t.muted, fontSize: 11 }}>
+            <Text style={{ color: t.ink, fontFamily: MONO, fontSize: 11 }}>{liveDot.c.ticker}</Text>
+            {'  ' + liveDot.c.name}
+            {liveDot.c.score === null
+              ? '  ·  unscored'
+              : '  ·  ' + ordinal(1 + placed.filter((q) => q.z !== null && q.z > liveDot.z).length) + ' of ' + scored.length}
+          </Text>
+        ) : (
+          <Text style={{ color: t.faint, fontSize: 10.5 }}>
+            Press the dots and slide — every name introduces itself. Lift to keep one.
+          </Text>
+        )}
+      </View>
+
+      <View style={{ marginTop: 4 }}>
         {head.map((c, i) => (
           <NameRow key={c.ticker} c={c} place={i + 1} t={t} zOf={zOf} pick={pick} wl={wl}
             onPress={() => onPick(s, c, s.constituents.indexOf(c))} />
         ))}
         {hidden > 0 && (
           <Text style={{ color: t.faint, fontSize: 10, textAlign: 'center', paddingVertical: 3 }}>
-            · {hidden} more in the middle — tap any dot ·
+            · {hidden} more between them, on the strip above ·
           </Text>
         )}
         {hidden > -3 && tail.map((c, i) => (
@@ -771,10 +868,11 @@ export default function App() {
     return m;
   }, [tiers]);
 
-  const choose = useCallback((sector, c, i) => {
+  const choose = useCallback((sector, c, i, keep) => {
     tapped();
     setPick((prev) => {
-      if (prev && prev.tier === sector.tier && prev.ticker === c.ticker) return null;
+      // A row tap toggles; a scrub that settles on the same name keeps it.
+      if (!keep && prev && prev.tier === sector.tier && prev.ticker === c.ticker) return null;
       const kin = ((data.peers || {})[c.ticker] || []).map(([ticker, r]) => ({
         ticker,
         r,
@@ -994,12 +1092,12 @@ def build_data(payload: dict) -> dict:
                 {"key": t["key"], "label": t["label"], "note": t["note"]}
                 for t in tiers
             ],
-            # Describes the data only. What the screen looks like is the
-            # app's business — a feed line about squares outlived the squares.
+            # Describes the data only. What the screen looks like — and how it
+            # is touched — is the app's business; a feed line about squares
+            # once outlived the squares.
             "blurb": (
                 f"{len(rendered[0])} corners of the US market, best first, by how "
-                f"steadily they climbed over nine months. Tap a company to see "
-                f"everything that moves with it, and to add it to your watchlist."
+                f"steadily they climbed over nine months."
             ),
             "footer": (
                 "Prices from FMP, adjusted for splits and dividends. Information only — "

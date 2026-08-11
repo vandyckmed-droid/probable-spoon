@@ -29,7 +29,7 @@ than either 25-name tier did (rank correlation 0.83).
 it to snack.expo.dev, which Expo Go opens from a link — no desktop, no build
 step, no App Store round trip.
 
-**Live link: https://snack.expo.dev/BIdX1mt5R8rpf10YDVhQ6** — open it in Expo
+**Live link: https://snack.expo.dev/NtFwwasb2seIIRXCIE7jV** — open it in Expo
 Go, or scan the QR on that page. Treat it as the address of the app: it only
 moves if the *code* is republished, which a data refresh no longer requires.
 
@@ -64,8 +64,8 @@ user called it, and the replacement moves every magnitude onto *position*:
   is clamped at ±2.5σ so one freak name cannot squash the rest onto the line.
 - **The tails named outright.** The three best and three worst appear as rows —
   place, ticker, name, a thin bar, the score — because those are the names a
-  reader actually wants; the middle is on the strip as shape, one tap from a
-  readout. A ★ marks watched names in the rows.
+  reader actually wants; the middle is on the strip as shape, a finger-slide
+  away. A ★ marks watched names in the rows.
 
 The palette rule that fell out of this: **the accent colours appear only at
 full strength on small marks** — dots, 3–4pt bars, numbers — and never as a
@@ -79,11 +79,20 @@ control: "By sector" uses the within-sector z, "Whole market" uses `g`, the
 same score z-scored across every name on the page. Both feed the same `X()`
 position function — a test asserts there is exactly one.
 
-Everything is a tap. Tapping a dot or a row selects the name: the readout
-names the company, gives its place in the sector, lists its correlation
-family, and offers the watch toggle. Unrelated dots dim to 25% while a family
-is lit; kin dots ring in the bright accent, the chosen dot rings in ink and
-grows a step. Watched names keep an ink ring on their dot, a ★ in the rows,
+Nobody taps a dot. Tapping an 8-point target shipped for one build and the
+user's verdict — "just terrible, not effortless" — was correct, so the strip
+became one responder surface instead: press anywhere and slide, and the
+nearest name selects itself under the finger, one haptic tick per name, a
+live ticker-and-score label above the dots and a steady one-line readout
+below them (fixed height, so scrubbing never makes the page jump). Lifting
+settles the selection, lights its correlation family and offers the watch
+toggle; a tap is a zero-length slide, so nothing needs aiming. Scrubbing
+left-to-right walks the sector worst-to-best in rank order. The strip claims
+the gesture (`onResponderTerminationRequest: false`) — the page scrolls from
+anywhere else, exactly the trade the iOS Stocks chart makes. Row taps still
+select directly, and a settle never toggles a name off where a repeated row
+tap does. Unrelated dots dim while a family is lit; kin dots ring in the
+bright accent, the live or chosen dot rings in ink and grows a step. Watched names keep an ink ring on their dot, a ★ in the rows,
 and appear as removable chips in a card above the map. The list persists via
 `@react-native-async-storage/async-storage`; storage failures degrade to
 in-memory, never to a crash.
@@ -147,8 +156,10 @@ The rendered bundle is also bundled (esbuild, react-native aliased to a
 ~40-line RN-to-CSS stub) and driven in a real Chromium against four feeds —
 good, 404, junk JSON, and one that never responds — asserting a good feed goes
 live, the other three fall back with the as-of date still on screen, and that
-tapping a name opens the readout, the watch toggle sticks, and the view
-switch relabels the page. The same stub renders both colour schemes for
+a mouse-driven scrub across a strip walks through distinct names live, the
+settle lights the family and offers the watch toggle, a zero-length press
+still selects, and the view switch relabels the page. The stub maps the RN
+responder system onto mouse events so the scrub is exercised as a real drag. The same stub renders both colour schemes for
 screenshots before any publish.
 
 ## Universe
